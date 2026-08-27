@@ -1,0 +1,72 @@
+services:
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${DB_NAME:-smartflow}
+      POSTGRES_USER: ${DB_USER:-smartflow}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?mot de passe requis}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-smartflow}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build: ./backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${DB_NAME:-smartflow}
+      SPRING_DATASOURCE_USERNAME: ${DB_USER:-smartflow}
+      SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD:?mot de passe requis}
+      SMARTFLOW_MAIL_HOST: mailhog
+      SMARTFLOW_AI_BASE_URL: http://ai:5000
+      SMARTFLOW_AI_ENABLED: ${AI_ENABLED:-false}
+      # ADR-01 exige un cookie de session "Secure" (TLS uniquement), mais rien dans cette
+      # pile ne termine de TLS (§15.1 - dev/intégration/recette servis en clair) : un cookie
+      # Secure y serait simplement jamais renvoyé par le navigateur, ce qui casserait la
+      # connexion plutôt que de la sécuriser. Un déploiement avec TLS devant ce service
+      # doit omettre cette variable pour retrouver le défaut sécurisé de l'application.
+      SESSION_COOKIE_SECURE: "false"
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/actuator/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  web:
+    build: ./frontend
+    depends_on:
+      - api
+    # ADR-01 - ce conteneur sert le SPA et fait aussi office de reverse proxy vers `api`
+    # (frontend/nginx.conf), donc le navigateur ne voit qu'une seule origine : le SPA
+    # appelle une URL relative (/api/v1/...), jamais une URL absolue vers un autre port.
+    ports:
+      - "5173:80"
+
+  ai:
+    build: ./ai-service
+    ports:
+      - "5000:5000"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:5000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  mailhog:
+    image: mailhog/mailhog:latest
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+
+volumes:
+  pgdata:

@@ -1,0 +1,105 @@
+# CI - ancrage §9.2 (GitHub Actions imposé par la pile technique) et §15.2 (pipeline
+# minimal). Ce fichier couvre les étapes 1-2 du pipeline minimal - vérification du format
+# et compilation, exécution des tests unitaires et d'intégration - pour les trois
+# composants du dépôt. Il ne couvre pas encore :
+#   - l'étape 3 (analyse des dépendances / qualité de code) : aucun outil n'est choisi ;
+#   - l'étape 4 (construction des images Docker taguées depuis Git) : backend/Dockerfile
+#     et frontend/Dockerfile sont vides à ce stade (seul ai-service/Dockerfile existe) ;
+#   - les étapes 5-6 (déploiement, secrets) : hors périmètre de l'intégration continue,
+#     et un déploiement automatisé n'est de toute façon prévu par §15.2 qu'"après
+#     stabilisation".
+# §15.1 - "Intégration : validation automatique des builds et tests" est l'environnement
+# que ce workflow sert.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend:
+    name: Backend (Java 21 / Spring Boot)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+          cache-dependency-path: backend/pom.xml
+
+      # §14 - tests unitaires (règles métier pures) et tests d'intégration (Testcontainers,
+      # vraies migrations Flyway) dans une seule commande Maven ; le runner ubuntu-latest
+      # fournit Docker nativement, requis par Testcontainers.
+      - name: Build and test
+        run: ./mvnw -B verify
+
+      - name: Publish surefire/failsafe reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-reports
+          path: backend/target/surefire-reports/**
+
+  frontend:
+    name: Frontend (React / TypeScript)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      # §14 - "tests front-end" (Vitest/Jest, React Testing Library) n'ont pas encore de
+      # suite écrite ; `npm run build` couvre à ce stade la vérification de format et de
+      # compilation du §15.2 (tsc -b && vite build). `npm test` rejoindra cette étape dès
+      # qu'un premier composant testable existe.
+      - name: Type-check and build
+        run: npm run build
+
+  ai-service:
+    name: AI service (Flask)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ai-service
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: ai-service/requirements-dev.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      # §15.3 - le point de santé exigé pour le service IA est aujourd'hui le seul
+      # comportement du service ; les tests de classification/résumé (§12) rejoindront
+      # cette étape au lot S9.
+      - name: Test
+        run: python -m pytest -q
