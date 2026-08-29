@@ -1,8 +1,10 @@
 package com.smartflow.backend.infrastructure.scheduler;
 
+import com.smartflow.backend.application.service.SlaEscalationService;
 import com.smartflow.backend.domain.entity.Request;
 import com.smartflow.backend.domain.entity.Sla;
 import com.smartflow.backend.domain.enums.RequestStatus;
+import com.smartflow.backend.domain.enums.SlaStatus;
 import com.smartflow.backend.domain.rule.SlaCalculator;
 import com.smartflow.backend.domain.rule.SlaEventOccurrence;
 import com.smartflow.backend.domain.rule.SlaSuspensionRule;
@@ -24,12 +26,14 @@ import java.util.Optional;
  * Periodically recomputes the materialized SLA read model on every in-progress Request
  * (RG-07, §6.7) by replaying its SlaEvent history (SlaSuspensionRule) through
  * SlaCalculator - see Request's class javadoc for the authority rule this enforces
- * (SlaEvent wins; these columns are only ever a cache of it). It never writes a new
- * SlaEvent itself: SUSPENDED/RESUMED events are written by
- * application/service/SlaSuspensionService when a workflow transition enters or leaves a
- * Step flagged Step.suspendSla. Detecting and logging WARNING_TRIGGERED/ESCALATED/BREACHED
- * SlaEvent rows, and the notification/escalation they should trigger (§6.7 - "Notification
- * avant échéance et escalade au responsable"), are not part of this pass.
+ * (SlaEvent wins; these columns are only ever a cache of it). SUSPENDED/RESUMED events are
+ * written by application/service/SlaSuspensionService when a workflow transition enters or
+ * leaves a Step flagged Step.suspendSla ; WARNING_TRIGGERED/BREACHED/ESCALATED are written
+ * here, once per threshold crossing, by delegating the before/after SlaStatus to
+ * application/service/SlaEscalationService (domain/rule/SlaThresholdTransitionRule decides
+ * whether anything actually crossed) - the notification/escalation §6.7 asks for
+ * ("Notification avant échéance et escalade au responsable") lives entirely in that
+ * service, not here.
  */
 @Component
 public class SlaSweepScheduler {
@@ -40,14 +44,17 @@ public class SlaSweepScheduler {
     private final SlaRepository slaRepository;
     private final SlaCalculator slaCalculator;
     private final SlaSuspensionRule slaSuspensionRule;
+    private final SlaEscalationService slaEscalationService;
     private final Clock clock;
 
     public SlaSweepScheduler(RequestRepository requestRepository, SlaRepository slaRepository,
-                              SlaCalculator slaCalculator, SlaSuspensionRule slaSuspensionRule, Clock clock) {
+                              SlaCalculator slaCalculator, SlaSuspensionRule slaSuspensionRule,
+                              SlaEscalationService slaEscalationService, Clock clock) {
         this.requestRepository = requestRepository;
         this.slaRepository = slaRepository;
         this.slaCalculator = slaCalculator;
         this.slaSuspensionRule = slaSuspensionRule;
+        this.slaEscalationService = slaEscalationService;
         this.clock = clock;
     }
 
@@ -82,6 +89,7 @@ public class SlaSweepScheduler {
         List<SuspensionPeriod> allPeriods = suspensions.periodsIncludingOpen();
         Instant submittedAt = request.getSubmittedAt();
 
+        SlaStatus previousStatus = request.getSlaStatus();
         request.setSlaDueAtFirstResponse(
                 slaCalculator.computeDueAt(submittedAt, sla.getFirstResponseMinutes(), allPeriods));
         request.setSlaDueAtResolution(
@@ -89,11 +97,12 @@ public class SlaSweepScheduler {
         // The resolution deadline is the overall SLA commitment; this does not yet
         // distinguish a "before first response" phase from a "before resolution" phase -
         // Request has no firstRespondedAt field to tell them apart.
-        request.setSlaStatus(
-                slaCalculator.computeStatus(now, submittedAt, sla.getResolutionMinutes(), allPeriods));
+        SlaStatus newStatus = slaCalculator.computeStatus(now, submittedAt, sla.getResolutionMinutes(), allPeriods);
+        request.setSlaStatus(newStatus);
         request.setSlaSuspendedSince(suspensions.openSince());
         request.setSlaSuspendedMinutes((int) suspensions.closedMinutes());
 
         requestRepository.save(request);
+        slaEscalationService.onStatusRecomputed(request, previousStatus, newStatus);
     }
 }

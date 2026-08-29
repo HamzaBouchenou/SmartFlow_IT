@@ -18,6 +18,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.util.List;
@@ -83,6 +84,19 @@ public class GlobalExceptionHandler {
         log.warn("Parameter type mismatch: {}", ex.getMessage());
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .body(ErrorResponse.of("VALIDATION_ERROR", "Paramètre '" + ex.getName() + "' invalide.", currentTraceId()));
+    }
+
+    /**
+     * RG-09 - le plafond du framework (spring.servlet.multipart.max-file-size, au-dessus du
+     * défaut applicatif - voir application.properties) a été franchi avant même d'atteindre
+     * AttachmentValidationRule ; même code que celui de cette règle pour rester cohérent
+     * côté front, plutôt que de laisser tomber sur handleUnexpected (500).
+     */
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<ErrorResponse> handleMaxUploadSizeExceeded(MaxUploadSizeExceededException ex) {
+        log.warn("Upload rejected, exceeds framework size cap: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(ErrorResponse.of("FILE_TOO_LARGE", "La taille du fichier dépasse la limite autorisée.", currentTraceId()));
     }
 
     @ExceptionHandler(HttpMessageNotReadableException.class)

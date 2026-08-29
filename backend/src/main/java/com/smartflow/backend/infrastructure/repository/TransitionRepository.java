@@ -17,4 +17,8 @@ public interface TransitionRepository extends JpaRepository<Transition, Long> {
     // application/service/WorkflowTransitionService les passe à TransitionResolutionRule
     // pour choisir celle qui s'applique réellement.
     List<Transition> findByFromStepIdAndAction(Long fromStepId, WorkflowAction action);
+
+    // §6.10/ADR-17 - toutes les transitions d'un WorkflowDefinition (une par Step de son
+    // graphe), pour l'écran d'administration.
+    List<Transition> findByFromStepIdIn(List<Long> fromStepIds);
 }

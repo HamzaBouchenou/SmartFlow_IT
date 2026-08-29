@@ -12,6 +12,7 @@ import com.smartflow.backend.domain.entity.Transition;
 import com.smartflow.backend.domain.entity.User;
 import com.smartflow.backend.domain.entity.UserRoleAssignment;
 import com.smartflow.backend.domain.entity.WorkflowDefinition;
+import com.smartflow.backend.domain.enums.RequestStatus;
 import com.smartflow.backend.domain.enums.Role;
 import com.smartflow.backend.domain.enums.ScopeType;
 import com.smartflow.backend.domain.enums.WorkflowAction;
@@ -199,6 +200,104 @@ class AuthorizationServiceIT {
         assertThat(result).isFalse();
     }
 
+    @Test
+    @DisplayName("ADR-10 - canView grants an AUDITOR (zero RolePermissionRule grants) whose GLOBAL scope covers a submitted request")
+    void canViewGrantsAuditorWithGlobalScopeOnSubmittedRequest() {
+        Department direction = departmentRepository.save(new Department("Direction IT", null));
+        Department service = departmentRepository.save(new Department("Support", direction));
+        Request request = aSubmittedRequest(service, WorkflowAction.VALIDATE, "adr10a");
+        User auditor = userRepository.save(new User("Ines", "Auditor", "ines@example.com", "hash"));
+        userRoleAssignmentRepository.save(new UserRoleAssignment(auditor, Role.AUDITOR, ScopeType.GLOBAL, null));
+
+        // AUDITOR grants no WorkflowAction at all (RolePermissionRule) - canAct would refuse
+        // every action, yet canView must still let this auditor read the record (§5 -
+        // "lecture seule sur périmètre autorisé").
+        assertThat(authorizationService.canAct(auditor, request, WorkflowAction.VALIDATE)).isFalse();
+        assertThat(authorizationService.canView(auditor, request)).isTrue();
+    }
+
+    @Test
+    @DisplayName("ADR-10 - canView refuses a DRAFT request even when the caller's scope would otherwise cover it")
+    void canViewRefusesDraftRegardlessOfScope() {
+        Department direction = departmentRepository.save(new Department("Direction IT", null));
+        Department service = departmentRepository.save(new Department("Support", direction));
+        RequestType requestType = aRequestType(service);
+        User requester = userRepository.save(new User("Dris", "Requester", "dris@example.com", "hash"));
+        Request draft = aRequest(requestType, requester, "DEM-2026-ADR10B"); // never submitted: currentStep stays null
+        User serviceManager = userRepository.save(new User("Sana", "Manager", "sana@example.com", "hash"));
+        userRoleAssignmentRepository.save(new UserRoleAssignment(serviceManager, Role.SERVICE_MANAGER, ScopeType.DEPARTMENT, service.getId()));
+
+        boolean result = authorizationService.canView(serviceManager, draft);
+
+        assertThat(result).isFalse();
+    }
+
+    @Test
+    @DisplayName("ADR-10 - canView refuses a caller whose scope does not cover the request at all")
+    void canViewRefusesWhenScopeDoesNotCover() {
+        Department direction = departmentRepository.save(new Department("Direction IT", null));
+        Department service = departmentRepository.save(new Department("Support", direction));
+        Department otherService = departmentRepository.save(new Department("Achats", direction));
+        Request request = aSubmittedRequest(service, WorkflowAction.VALIDATE, "adr10c");
+        User outsider = userRepository.save(new User("Zak", "Outsider", "zak@example.com", "hash"));
+        userRoleAssignmentRepository.save(new UserRoleAssignment(outsider, Role.SERVICE_MANAGER, ScopeType.DEPARTMENT, otherService.getId()));
+
+        boolean result = authorizationService.canView(outsider, request);
+
+        assertThat(result).isFalse();
+    }
+
+    @Test
+    @DisplayName("ADR-11 - the requester can always annotate their own request, including while it is still a DRAFT")
+    void canAnnotateAlwaysGrantsRequesterEvenOnDraft() {
+        Department direction = departmentRepository.save(new Department("Direction IT", null));
+        Department service = departmentRepository.save(new Department("Support", direction));
+        RequestType requestType = aRequestType(service);
+        User requester = userRepository.save(new User("Yara", "Requester", "yara@example.com", "hash"));
+        Request draft = aRequest(requestType, requester, "DEM-2026-ADR11A");
+
+        assertThat(authorizationService.canAnnotate(requester, draft)).isTrue();
+    }
+
+    @Test
+    @DisplayName("ADR-11 - a MANAGER whose scope covers the request can annotate it once submitted")
+    void canAnnotateGrantsComplementaryRoleOnSubmittedRequest() {
+        Department direction = departmentRepository.save(new Department("Direction IT", null));
+        Department service = departmentRepository.save(new Department("Support", direction));
+        Request request = aSubmittedRequest(service, WorkflowAction.VALIDATE, "adr11b");
+        User manager = userRepository.save(new User("Ali", "Manager", "ali.adr11@example.com", "hash"));
+        userRoleAssignmentRepository.save(new UserRoleAssignment(manager, Role.MANAGER, ScopeType.DEPARTMENT, service.getId()));
+
+        assertThat(authorizationService.canAnnotate(manager, request)).isTrue();
+    }
+
+    @Test
+    @DisplayName("ADR-11 - an AUDITOR whose scope covers the request can still not annotate it (read-only)")
+    void canAnnotateRefusesAuditorEvenWithCoveringScope() {
+        Department direction = departmentRepository.save(new Department("Direction IT", null));
+        Department service = departmentRepository.save(new Department("Support", direction));
+        Request request = aSubmittedRequest(service, WorkflowAction.VALIDATE, "adr11c");
+        User auditor = userRepository.save(new User("Nora", "Auditor", "nora.adr11@example.com", "hash"));
+        userRoleAssignmentRepository.save(new UserRoleAssignment(auditor, Role.AUDITOR, ScopeType.GLOBAL, null));
+
+        assertThat(authorizationService.canView(auditor, request)).isTrue();
+        assertThat(authorizationService.canAnnotate(auditor, request)).isFalse();
+    }
+
+    @Test
+    @DisplayName("ADR-11 - a DRAFT stays unannotable by anyone but its own requester, regardless of scope")
+    void canAnnotateRefusesNonRequesterOnDraft() {
+        Department direction = departmentRepository.save(new Department("Direction IT", null));
+        Department service = departmentRepository.save(new Department("Support", direction));
+        RequestType requestType = aRequestType(service);
+        User requester = userRepository.save(new User("Talia", "Requester", "talia.adr11@example.com", "hash"));
+        Request draft = aRequest(requestType, requester, "DEM-2026-ADR11D");
+        User manager = userRepository.save(new User("Yassine", "Manager", "yassine.adr11@example.com", "hash"));
+        userRoleAssignmentRepository.save(new UserRoleAssignment(manager, Role.MANAGER, ScopeType.DEPARTMENT, service.getId()));
+
+        assertThat(authorizationService.canAnnotate(manager, draft)).isFalse();
+    }
+
     private RequestType aRequestType(Department service) {
         ServiceCatalog serviceCatalog = serviceCatalogRepository.save(new ServiceCatalog("Support catalog", service));
         return requestTypeRepository.save(new RequestType(serviceCatalog, "Incident"));
@@ -232,6 +331,11 @@ class AuthorizationServiceIT {
         Step step = aStepWithTransition(aWorkflowDefinition(requestType), offeredAction, null);
         Request request = aRequest(requestType, requester, reference);
         request.setCurrentStep(step);
+        // A real RequestService.submit() always sets status together with currentStep
+        // (ADR-03) - canAct never reads status itself so every canAct-only test above kept
+        // working without it, but ADR-10's canView does (a DRAFT is never viewable through
+        // it, whatever its currentStep), so this helper now matches its own name.
+        request.setStatus(RequestStatus.SUBMITTED);
         return requestRepository.save(request);
     }
 }

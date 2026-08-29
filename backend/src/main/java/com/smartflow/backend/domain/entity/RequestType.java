@@ -42,6 +42,12 @@ public class RequestType extends BaseEntity {
     @Column(nullable = false)
     private boolean active = true;
 
+    // ADR-14 (docs/DECISIONS.md) - RG-08 "si le service le permet" : ancré à ce grain
+    // (comme SLA/WorkflowDefinition/FormDefinition), pas à ServiceCatalog ni à un paramètre
+    // global.
+    @Column(name = "reopen_allowed", nullable = false)
+    private boolean reopenAllowed = true;
+
     @Column(name = "display_order", nullable = false)
     private int displayOrder;
 
@@ -125,6 +131,14 @@ public class RequestType extends BaseEntity {
 
     public void setActive(boolean active) {
         this.active = active;
+    }
+
+    public boolean isReopenAllowed() {
+        return reopenAllowed;
+    }
+
+    public void setReopenAllowed(boolean reopenAllowed) {
+        this.reopenAllowed = reopenAllowed;
     }
 
     public int getDisplayOrder() {

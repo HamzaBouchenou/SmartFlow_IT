@@ -10,10 +10,12 @@ import com.smartflow.backend.domain.entity.ServiceCatalog;
 import com.smartflow.backend.domain.entity.Step;
 import com.smartflow.backend.domain.entity.TaskAssignment;
 import com.smartflow.backend.domain.entity.User;
+import com.smartflow.backend.domain.entity.UserRoleAssignment;
 import com.smartflow.backend.domain.entity.WorkflowDefinition;
 import com.smartflow.backend.domain.enums.FieldType;
 import com.smartflow.backend.domain.enums.PublicationStatus;
 import com.smartflow.backend.domain.enums.Role;
+import com.smartflow.backend.domain.enums.ScopeType;
 import com.smartflow.backend.infrastructure.repository.DepartmentRepository;
 import com.smartflow.backend.infrastructure.repository.FieldOptionRepository;
 import com.smartflow.backend.infrastructure.repository.FormDefinitionRepository;
@@ -24,6 +26,7 @@ import com.smartflow.backend.infrastructure.repository.ServiceCatalogRepository;
 import com.smartflow.backend.infrastructure.repository.StepRepository;
 import com.smartflow.backend.infrastructure.repository.TaskAssignmentRepository;
 import com.smartflow.backend.infrastructure.repository.UserRepository;
+import com.smartflow.backend.infrastructure.repository.UserRoleAssignmentRepository;
 import com.smartflow.backend.infrastructure.repository.WorkflowDefinitionRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -103,6 +106,10 @@ class RequestControllerIT {
     @Autowired
     private UserRepository userRepository;
 
+    @Autowired
+    private UserRoleAssignmentRepository userRoleAssignmentRepository;
+
+    private Department department;
     private RequestType requestType;
     private Step firstStep;
     private UserDetails asRequester;
@@ -112,7 +119,7 @@ class RequestControllerIT {
 
     @BeforeEach
     void seedCatalogAndWorkflow() {
-        Department department = departmentRepository.save(new Department("Support", null));
+        department = departmentRepository.save(new Department("Support", null));
         ServiceCatalog service = serviceCatalogRepository.save(new ServiceCatalog("Support Informatique", department));
         requestType = requestTypeRepository.save(new RequestType(service, "Demande de matériel"));
 
@@ -199,6 +206,41 @@ class RequestControllerIT {
     }
 
     @Test
+    @DisplayName("ADR-10/RG-06 - a service manager whose scope covers the request's department can view it once submitted, never while still a draft")
+    void complementaryRoleSeesSubmittedRequestButNotItsDraft() throws Exception {
+        User serviceManager = userRepository.save(new User("Nawal", "Manager", "nawal.qa@example.com", "hash"));
+        userRoleAssignmentRepository.save(new UserRoleAssignment(serviceManager, Role.SERVICE_MANAGER, ScopeType.DEPARTMENT, department.getId()));
+        UserDetails asServiceManager = new SmartFlowUserDetails(serviceManager, Set.of(Role.SERVICE_MANAGER));
+
+        Long id = createDraft(Map.of("justification", "Clavier cassé"));
+        mockMvc.perform(get("/api/v1/requests/{id}", id).with(user(asServiceManager)))
+                .andExpect(status().isNotFound());
+
+        mockMvc.perform(post("/api/v1/requests/{id}/submit", id).with(user(asRequester)).with(csrf()))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/v1/requests/{id}", id).with(user(asServiceManager)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("SUBMITTED"));
+    }
+
+    @Test
+    @DisplayName("ADR-10 - a service manager whose scope covers a different department cannot view the request (404, not 403)")
+    void unrelatedDepartmentScopeStillCannotViewRequest() throws Exception {
+        Department otherDepartment = departmentRepository.save(new Department("Achats", null));
+        User outsiderManager = userRepository.save(new User("Zak", "Manager", "zak.qa@example.com", "hash"));
+        userRoleAssignmentRepository.save(new UserRoleAssignment(outsiderManager, Role.SERVICE_MANAGER, ScopeType.DEPARTMENT, otherDepartment.getId()));
+        UserDetails asOutsiderManager = new SmartFlowUserDetails(outsiderManager, Set.of(Role.SERVICE_MANAGER));
+
+        Long id = createDraft(Map.of("justification", "Clavier cassé"));
+        mockMvc.perform(post("/api/v1/requests/{id}/submit", id).with(user(asRequester)).with(csrf()))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/v1/requests/{id}", id).with(user(asOutsiderManager)))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
     @DisplayName("§6.4 - a submitted request can no longer be edited as a draft")
     void submittedRequestCannotBeEditedAsDraft() throws Exception {
         Long id = createDraft(Map.of("justification", "Clavier cassé"));
@@ -281,6 +323,77 @@ class RequestControllerIT {
         mockMvc.perform(post("/api/v1/requests/{id}/cancel", id).with(user(asRequester)).with(csrf()))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("ALREADY_TERMINAL"));
+    }
+
+    @Test
+    @DisplayName("§6.9/RG-06 - GET /api/v1/requests is the requester's own list, including drafts, and never another requester's")
+    void listMineReturnsOwnRequestsIncludingDrafts() throws Exception {
+        Long ownDraftId = createDraft(Map.of());
+
+        String otherBody = objectMapper.writeValueAsString(Map.of(
+                "requestTypeId", requestType.getId(), "title", "Autre demande", "fieldValues", Map.of()));
+        mockMvc.perform(post("/api/v1/requests").with(user(asOtherRequester)).with(csrf()).contentType("application/json").content(otherBody))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(get("/api/v1/requests").with(user(asRequester)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].id").value(ownDraftId))
+                .andExpect(jsonPath("$.content[0].status").value("DRAFT"));
+    }
+
+    @Test
+    @DisplayName("§6.9/§11.1 - GET /api/v1/requests?status= filters the requester's own list")
+    void listMineFiltersByStatus() throws Exception {
+        Long draftId = createDraft(Map.of());
+        Long submittedId = createDraft(Map.of("justification", "Clavier cassé"));
+        mockMvc.perform(post("/api/v1/requests/{id}/submit", submittedId).with(user(asRequester)).with(csrf()))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/v1/requests").queryParam("status", "DRAFT").with(user(asRequester)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].id").value(draftId));
+
+        mockMvc.perform(get("/api/v1/requests").queryParam("status", "SUBMITTED").with(user(asRequester)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].id").value(submittedId));
+    }
+
+    @Test
+    @DisplayName("§6.4 - GET /api/v1/requests/{id}/history is readable by the requester and starts empty (SUBMIT is not itself a WorkflowAction/history row - see RequestTransitionControllerIT for a populated frise)")
+    void historyReadableAndInitiallyEmpty() throws Exception {
+        Long id = createDraft(Map.of("justification", "Clavier cassé"));
+        mockMvc.perform(post("/api/v1/requests/{id}/submit", id).with(user(asRequester)).with(csrf()))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/v1/requests/{id}/history", id).with(user(asRequester)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(0));
+    }
+
+    @Test
+    @DisplayName("RG-06 - the history of another requester's request is invisible (404, not 403)")
+    void historyInvisibleToAnotherUser() throws Exception {
+        Long id = createDraft(Map.of());
+
+        mockMvc.perform(get("/api/v1/requests/{id}/history", id).with(user(asOtherRequester)))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("§6.7 - the request detail now also carries priority and the materialized SLA read model")
+    void detailCarriesSlaAndPriorityFields() throws Exception {
+        Long id = createDraft(Map.of("justification", "Clavier cassé"));
+
+        mockMvc.perform(get("/api/v1/requests/{id}", id).with(user(asRequester)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.priority").doesNotExist())
+                .andExpect(jsonPath("$.slaStatus").doesNotExist())
+                .andExpect(jsonPath("$.slaDueAtFirstResponse").doesNotExist())
+                .andExpect(jsonPath("$.slaDueAtResolution").doesNotExist())
+                .andExpect(jsonPath("$.reopenDeadline").doesNotExist());
     }
 
     private Long createDraft(Map<String, String> fieldValues) throws Exception {

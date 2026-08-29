@@ -9,4 +9,8 @@ public interface RequestTypeRepository extends JpaRepository<RequestType, Long> 
 
     // §6.2 - "Activation... et ordre d'affichage des types de demande" pour un service donné.
     List<RequestType> findByServiceCatalogIdAndActiveTrueOrderByDisplayOrderAsc(Long serviceCatalogId);
+
+    // §6.10 - vue administration : incluant les types désactivés, contrairement à
+    // findByServiceCatalogIdAndActiveTrueOrderByDisplayOrderAsc qui sert le catalogue public.
+    List<RequestType> findByServiceCatalogIdOrderByDisplayOrderAsc(Long serviceCatalogId);
 }

@@ -6,6 +6,7 @@ import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
 
+import java.time.Instant;
 import java.util.Collection;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -60,9 +61,12 @@ public class SmartFlowUserDetails implements UserDetails {
 
     @Override
     public boolean isAccountNonLocked() {
-        // §13 - "limitation des tentatives" (login attempt throttling / lockout) is not
-        // yet implemented; this always returns true until that use case is built.
-        return true;
+        // ADR-13 (docs/DECISIONS.md) - crosscutting/security/LoginAttemptListener sets
+        // User.lockedUntil on the max-th failed attempt; Instant.now() rather than an
+        // injected Clock because this class, like a JPA @PrePersist callback, is a plain
+        // object built per authentication, not a Spring bean that could receive one.
+        Instant lockedUntil = user.getLockedUntil();
+        return lockedUntil == null || Instant.now().isAfter(lockedUntil);
     }
 
     @Override
