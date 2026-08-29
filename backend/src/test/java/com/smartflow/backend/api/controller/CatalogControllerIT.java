@@ -77,6 +77,17 @@ class CatalogControllerIT {
     }
 
     @Test
+    @DisplayName("§6.2 - sans aucun filtre (q/category/departmentId absents), la recherche ne lève pas d'erreur")
+    void listsAllServicesWhenNoFilterIsProvided() throws Exception {
+        // Régression : ServiceCatalogRepository.search liait :keyword sans type explicite,
+        // ce que PostgreSQL résolvait en bytea quand la valeur est null - "function
+        // lower(bytea) does not exist" (500) dès qu'aucun paramètre n'était fourni, ce
+        // qu'aucun autre test de cette classe n'exerçait (tous passent q ou category).
+        mockMvc.perform(get("/api/v1/services").with(user("someone")))
+                .andExpect(status().isOk());
+    }
+
+    @Test
     @DisplayName("§6.2 - lists only active services, ordered by displayOrder, never an inactive one")
     void listsOnlyActiveServicesInDisplayOrder() throws Exception {
         // V5's own seed data already populates service_catalog (this test runs against the

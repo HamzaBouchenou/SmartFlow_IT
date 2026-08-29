@@ -1,6 +1,7 @@
 package com.smartflow.backend.application.service;
 
 import com.smartflow.backend.application.security.AuthorizationService;
+import com.smartflow.backend.crosscutting.audit.AuditService;
 import com.smartflow.backend.domain.entity.Department;
 import com.smartflow.backend.domain.entity.Request;
 import com.smartflow.backend.domain.entity.RequestHistory;
@@ -9,6 +10,7 @@ import com.smartflow.backend.domain.entity.TaskAssignment;
 import com.smartflow.backend.domain.entity.Team;
 import com.smartflow.backend.domain.entity.Transition;
 import com.smartflow.backend.domain.entity.User;
+import com.smartflow.backend.domain.enums.NotificationType;
 import com.smartflow.backend.domain.enums.RequestStatus;
 import com.smartflow.backend.domain.enums.WorkflowAction;
 import com.smartflow.backend.domain.exception.EntityNotFoundException;
@@ -21,6 +23,7 @@ import com.smartflow.backend.infrastructure.repository.RequestFieldValueReposito
 import com.smartflow.backend.infrastructure.repository.RequestHistoryRepository;
 import com.smartflow.backend.infrastructure.repository.RequestRepository;
 import com.smartflow.backend.infrastructure.repository.StepRepository;
+import com.smartflow.backend.infrastructure.repository.SystemParameterRepository;
 import com.smartflow.backend.infrastructure.repository.TaskAssignmentRepository;
 import com.smartflow.backend.infrastructure.repository.TeamRepository;
 import com.smartflow.backend.infrastructure.repository.TransitionRepository;
@@ -29,6 +32,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
@@ -65,7 +69,14 @@ public class WorkflowTransitionService {
     private final SlaSuspensionService slaSuspensionService;
     private final TransitionResolutionRule transitionResolutionRule;
     private final CommentRequirementRule commentRequirementRule;
+    private final NotificationService notificationService;
+    private final AuditService auditService;
+    private final SystemParameterRepository systemParameterRepository;
     private final Clock clock;
+
+    /** RG-08/ADR-14 - §6.10 "durée paramétrable" de réouverture, en jours après clôture. */
+    public static final String REOPEN_WINDOW_DAYS_KEY = "requests.reopen-window-days";
+    private static final int DEFAULT_REOPEN_WINDOW_DAYS = 30;
 
     public WorkflowTransitionService(RequestRepository requestRepository, TransitionRepository transitionRepository,
                                       StepRepository stepRepository, RequestFieldValueRepository requestFieldValueRepository,
@@ -74,7 +85,8 @@ public class WorkflowTransitionService {
                                       TeamRepository teamRepository, AuthorizationService authorizationService,
                                       SlaSuspensionService slaSuspensionService,
                                       TransitionResolutionRule transitionResolutionRule,
-                                      CommentRequirementRule commentRequirementRule, Clock clock) {
+                                      CommentRequirementRule commentRequirementRule, NotificationService notificationService,
+                                      AuditService auditService, SystemParameterRepository systemParameterRepository, Clock clock) {
         this.requestRepository = requestRepository;
         this.transitionRepository = transitionRepository;
         this.stepRepository = stepRepository;
@@ -87,6 +99,9 @@ public class WorkflowTransitionService {
         this.slaSuspensionService = slaSuspensionService;
         this.transitionResolutionRule = transitionResolutionRule;
         this.commentRequirementRule = commentRequirementRule;
+        this.notificationService = notificationService;
+        this.systemParameterRepository = systemParameterRepository;
+        this.auditService = auditService;
         this.clock = clock;
     }
 
@@ -117,6 +132,7 @@ public class WorkflowTransitionService {
 
         Instant now = clock.instant();
         Step toStep;
+        User newlyAssignedUser = null;
         if (action == WorkflowAction.CLOSE) {
             toStep = null;
             closeRequest(request, closureReason, closureSolution, now);
@@ -124,7 +140,7 @@ public class WorkflowTransitionService {
             toStep = requireTargetStep(resolved);
             request.setCurrentStep(toStep);
             if (action == WorkflowAction.ASSIGN) {
-                assign(request, actingUser, assignedUserId, assignedTeamId);
+                newlyAssignedUser = assign(request, actingUser, assignedUserId, assignedTeamId);
             }
         }
         request = requestRepository.save(request);
@@ -137,7 +153,49 @@ public class WorkflowTransitionService {
         if (toStep != null) {
             slaSuspensionService.onStepEntered(request, toStep, now);
         }
+        notifyForAction(request, action, actingUser, newlyAssignedUser);
+        // RG-11 - "statut" pour CLOSE (ADR-03 : seule cette action clôture réellement la
+        // demande) et "affectation" pour ASSIGN ; les autres actions ne changent ni l'un ni
+        // l'autre au sens de RG-11 (seule l'étape courante bouge, ADR-03), mais restent
+        // journalisées : elles relèvent de la même décision auditable (RG-04 le demande déjà
+        // pour l'historique métier, RG-11 l'étend au journal d'audit).
+        String summary = switch (action) {
+            case CLOSE -> "status: SUBMITTED -> CLOSED, reference=" + request.getReference();
+            case ASSIGN -> "assignedUserId=" + (newlyAssignedUser != null ? newlyAssignedUser.getId() : null)
+                    + ", assignedTeamId=" + assignedTeamId + ", reference=" + request.getReference();
+            default -> "step: " + (fromStep != null ? fromStep.getCode() : null) + " -> "
+                    + (toStep != null ? toStep.getCode() : null) + ", reference=" + request.getReference();
+        };
+        auditService.record(actingUser, action.name(), "Request", request.getId().toString(), summary);
         return request;
+    }
+
+    /**
+     * §6.8 - "affectation, demande de complément, décision... et clôture" font partie des
+     * "événements importants" à notifier ; VALIDATE/REJECT/RETURN partagent tous les trois
+     * la lecture "décision" du CDC plutôt que trois types distincts (aucun n'existe dans
+     * NotificationType au-delà de DECISION). ASSIGN ne notifie que quand quelqu'un d'autre
+     * que actingUser a été chargé (une "prise en charge" auto-affectée n'a personne à
+     * prévenir : l'agent qui vient d'agir sait déjà ce qu'il a fait), et seulement quand un
+     * individu précis a été résolu (une simple dépose en file d'équipe n'a encore personne
+     * à notifier).
+     */
+    private void notifyForAction(Request request, WorkflowAction action, User actingUser, User newlyAssignedUser) {
+        Map<String, String> variables = Map.of("reference", request.getReference(), "title", request.getTitle());
+        switch (action) {
+            case ASSIGN -> {
+                if (newlyAssignedUser != null && !newlyAssignedUser.getId().equals(actingUser.getId())) {
+                    notificationService.notify(newlyAssignedUser, NotificationType.ASSIGNMENT, request,
+                            "La demande " + request.getReference() + " vous a été affectée", null, variables);
+                }
+            }
+            case REQUEST_INFO -> notificationService.notify(request.getRequester(), NotificationType.INFO_REQUESTED,
+                    request, "Complément demandé pour " + request.getReference(), null, variables);
+            case VALIDATE, REJECT, RETURN -> notificationService.notify(request.getRequester(), NotificationType.DECISION,
+                    request, "Décision sur votre demande " + request.getReference(), null, variables);
+            case CLOSE -> notificationService.notify(request.getRequester(), NotificationType.CLOSURE, request,
+                    "Votre demande " + request.getReference() + " a été clôturée", null, variables);
+        }
     }
 
     private CandidateTransition resolveTransition(Request request, Step fromStep, WorkflowAction action) {
@@ -171,6 +229,16 @@ public class WorkflowTransitionService {
         request.setClosureReason(closureReason);
         request.setClosureSolution(closureSolution);
         request.setCurrentStep(null);
+        // RG-08/ADR-14 - fenêtre de réouverture, posée à chaque clôture qu'elle finisse par
+        // servir ou non (RequestService.reopen vérifie reopenAllowed séparément).
+        request.setReopenDeadline(now.plus(Duration.ofDays(configuredReopenWindowDays())));
+    }
+
+    /** RG-08/ADR-14 - §6.10 "durée paramétrable", administrable via SystemParameter. */
+    private int configuredReopenWindowDays() {
+        return systemParameterRepository.findByKey(REOPEN_WINDOW_DAYS_KEY)
+                .map(parameter -> Integer.parseInt(parameter.getValue()))
+                .orElse(DEFAULT_REOPEN_WINDOW_DAYS);
     }
 
     /**
@@ -185,7 +253,7 @@ public class WorkflowTransitionService {
      * ne devrait pas plus se retrouver assigné à sa propre validation qu'y être autorisé
      * directement).
      */
-    private void assign(Request request, User actingUser, Long assignedUserId, Long assignedTeamId) {
+    private User assign(Request request, User actingUser, Long assignedUserId, Long assignedTeamId) {
         if (assignedUserId != null && assignedTeamId != null) {
             throw new InvalidRequestStateException("AMBIGUOUS_ASSIGNMENT",
                     "Choisir un agent précis ou une équipe, pas les deux.");
@@ -225,6 +293,7 @@ public class WorkflowTransitionService {
                     taskAssignmentRepository.saveAndFlush(existing);
                 });
         taskAssignmentRepository.save(new TaskAssignment(request, assignedUser, assignedTeam, actingUser));
+        return assignedUser;
     }
 
     private ResolutionContext buildContext(Request request) {

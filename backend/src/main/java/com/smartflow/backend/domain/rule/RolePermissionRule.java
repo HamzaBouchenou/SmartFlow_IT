@@ -29,8 +29,10 @@ public class RolePermissionRule {
         grants.put(Role.MANAGER, EnumSet.of(WorkflowAction.VALIDATE, WorkflowAction.REJECT, WorkflowAction.RETURN));
         // §5 - "Agent de traitement : qualifier, prendre en charge, commenter et résoudre".
         // Prendre en charge -> ASSIGN, résoudre -> CLOSE ; qualifier/commenter ne sont pas
-        // des WorkflowAction (ce ne sont pas des transitions de workflow).
-        grants.put(Role.AGENT, EnumSet.of(WorkflowAction.ASSIGN, WorkflowAction.REQUEST_INFO, WorkflowAction.CLOSE));
+        // des WorkflowAction (ce ne sont pas des transitions de workflow). REOPEN (ADR-14) :
+        // symétrique de CLOSE - un rôle qui peut clôturer peut rouvrir ce qu'il a clôturé.
+        grants.put(Role.AGENT, EnumSet.of(WorkflowAction.ASSIGN, WorkflowAction.REQUEST_INFO,
+                WorkflowAction.CLOSE, WorkflowAction.REOPEN));
         // §5 - "Responsable de service : piloter la charge, les délais et les règles de son
         // service" sur "toutes les demandes ... de son service" -> autorité de recours sur
         // l'ensemble des actions de workflow, bornée par le périmètre DEPARTMENT de

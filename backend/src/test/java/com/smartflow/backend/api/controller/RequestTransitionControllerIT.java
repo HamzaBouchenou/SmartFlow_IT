@@ -52,6 +52,7 @@ import java.util.Set;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -191,6 +192,16 @@ class RequestTransitionControllerIT {
                     assertThat(h.getToStep().getId()).isEqualTo(validation.getId());
                     assertThat(h.getActor().getId()).isEqualTo(agent.getId());
                 });
+
+        // §6.4 - "frise d'avancement et historique complet" : GET /history reflects the
+        // same row via the HTTP surface (RequestHistoryMapper), not just the repository.
+        mockMvc.perform(get("/api/v1/requests/{id}/history", id).with(user(asRequester)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].action").value("ASSIGN"))
+                .andExpect(jsonPath("$[0].fromStepName").value(qualification.getName()))
+                .andExpect(jsonPath("$[0].toStepName").value(validation.getName()))
+                .andExpect(jsonPath("$[0].actorName").value("Sara Bennis"));
     }
 
     @Test
@@ -282,7 +293,9 @@ class RequestTransitionControllerIT {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("CLOSED"))
                 .andExpect(jsonPath("$.currentStepId").doesNotExist())
-                .andExpect(jsonPath("$.availableActions").isEmpty());
+                // RG-08/ADR-14 - the agent who just closed it (same TEAM scope as
+                // traitement) can reopen it within the window: REOPEN, not an empty list.
+                .andExpect(jsonPath("$.availableActions").value(org.hamcrest.Matchers.contains("REOPEN")));
 
         var request = requestRepository.findById(id).orElseThrow();
         assertThat(request.getClosureReason()).isEqualTo("Matériel remis au demandeur");

@@ -14,6 +14,11 @@ import java.time.Instant;
 /**
  * Account and affiliation data (§6.1 - Authentification et profils). "users" because
  * "user" is a reserved keyword in PostgreSQL.
+ *
+ * failedLoginAttempts/lockedUntil (ADR-13, docs/DECISIONS.md) are a mutable counter/lock
+ * for THIS account, written only by crosscutting/security/LoginAttemptListener - never a
+ * history to preserve, unlike RequestHistory/AuditLog, so a plain reset on success or on
+ * locking is correct (RG-11 does not require tracing individual login attempts).
  */
 @Entity
 @Table(name = "users")
@@ -41,6 +46,12 @@ public class User extends BaseEntity {
 
     @Column(nullable = false)
     private boolean active = true;
+
+    @Column(name = "failed_login_attempts", nullable = false)
+    private int failedLoginAttempts = 0;
+
+    @Column(name = "locked_until")
+    private Instant lockedUntil;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
@@ -124,6 +135,22 @@ public class User extends BaseEntity {
 
     public void setActive(boolean active) {
         this.active = active;
+    }
+
+    public int getFailedLoginAttempts() {
+        return failedLoginAttempts;
+    }
+
+    public void setFailedLoginAttempts(int failedLoginAttempts) {
+        this.failedLoginAttempts = failedLoginAttempts;
+    }
+
+    public Instant getLockedUntil() {
+        return lockedUntil;
+    }
+
+    public void setLockedUntil(Instant lockedUntil) {
+        this.lockedUntil = lockedUntil;
     }
 
     public Instant getCreatedAt() {

@@ -10,12 +10,18 @@ import java.util.Map;
  * entrée vient de AuthorizationService.canAct, jamais d'une règle recopiée côté client.
  * assignedUserId/assignedTeamId (§6.6) reflètent la seule TaskAssignment active, ou sont
  * tous les deux null si personne n'a encore pris en charge la demande.
+ *
+ * §6.7 - slaStatus/slaDueAtFirstResponse/slaDueAtResolution sont lus tels quels depuis le
+ * modèle matérialisé de Request (RG-07 - jamais recalculés ici, CLAUDE.md "ce qu'il ne faut
+ * jamais faire - calculer un statut SLA à la volée"). reopenDeadline (RG-08/ADR-14) n'a de
+ * sens que pour une demande CLOSED dont le type autorise la réouverture ; `null` sinon.
  */
 public record RequestDetailResponse(
         Long id,
         String reference,
         Long requestTypeId,
         String status,
+        String priority,
         String title,
         String description,
         Long currentStepId,
@@ -25,5 +31,9 @@ public record RequestDetailResponse(
         Long assignedUserId,
         String assignedUserName,
         Long assignedTeamId,
-        String assignedTeamName) {
+        String assignedTeamName,
+        String slaStatus,
+        Instant slaDueAtFirstResponse,
+        Instant slaDueAtResolution,
+        Instant reopenDeadline) {
 }

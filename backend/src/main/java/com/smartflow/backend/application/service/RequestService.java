@@ -1,15 +1,18 @@
 package com.smartflow.backend.application.service;
 
 import com.smartflow.backend.application.security.AuthorizationService;
+import com.smartflow.backend.crosscutting.audit.AuditService;
 import com.smartflow.backend.domain.entity.FieldOption;
 import com.smartflow.backend.domain.entity.FormField;
 import com.smartflow.backend.domain.entity.Request;
 import com.smartflow.backend.domain.entity.RequestFieldValue;
+import com.smartflow.backend.domain.entity.RequestHistory;
 import com.smartflow.backend.domain.entity.RequestType;
 import com.smartflow.backend.domain.entity.Step;
 import com.smartflow.backend.domain.entity.TaskAssignment;
 import com.smartflow.backend.domain.entity.User;
 import com.smartflow.backend.domain.entity.WorkflowDefinition;
+import com.smartflow.backend.domain.enums.NotificationType;
 import com.smartflow.backend.domain.enums.PublicationStatus;
 import com.smartflow.backend.domain.enums.RequestStatus;
 import com.smartflow.backend.domain.enums.WorkflowAction;
@@ -19,10 +22,13 @@ import com.smartflow.backend.domain.exception.InvalidRequestStateException;
 import com.smartflow.backend.domain.rule.FormFieldSpec;
 import com.smartflow.backend.domain.rule.FormValidationRule;
 import com.smartflow.backend.infrastructure.repository.RequestFieldValueRepository;
+import com.smartflow.backend.infrastructure.repository.RequestHistoryRepository;
 import com.smartflow.backend.infrastructure.repository.RequestRepository;
 import com.smartflow.backend.infrastructure.repository.StepRepository;
 import com.smartflow.backend.infrastructure.repository.TaskAssignmentRepository;
 import com.smartflow.backend.infrastructure.repository.WorkflowDefinitionRepository;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -44,15 +50,19 @@ import java.util.Map;
  * demande déjà entrée dans son circuit (§5.1's formula requires a current Step). Créer,
  * modifier, soumettre ou annuler son propre brouillon n'est pas un WorkflowAction (§6.4 les
  * énumère séparément des actions de workflow du §6.5) - c'est une garde de propriété simple
- * (RG-06), volontairement plus étroite que canAct : seul le demandeur d'une Request peut
- * agir dessus via ce service. Un agent/manager consultant une demande dans son périmètre
- * (§6.6 - "Mes tâches") est un cas d'usage séparé, non couvert ici.
+ * (RG-06), volontairement plus étroite que canAct pour créer/modifier/soumettre/annuler :
+ * seul le demandeur d'une Request agit dessus via ce service (getOwned/getOwnedDraft). La
+ * lecture seule (getDetail) suit en revanche ADR-10 (docs/DECISIONS.md) : RG-06 prévoit
+ * elle-même "sauf rôle complémentaire prévu par l'organisation", donc un agent/manager dont
+ * le périmètre couvre la demande peut la consulter (jamais un simple brouillon) sans pour
+ * autant pouvoir y modifier quoi que ce soit par cette voie.
  */
 @Service
 public class RequestService {
 
     private final RequestRepository requestRepository;
     private final RequestFieldValueRepository requestFieldValueRepository;
+    private final RequestHistoryRepository requestHistoryRepository;
     private final CatalogService catalogService;
     private final WorkflowDefinitionRepository workflowDefinitionRepository;
     private final StepRepository stepRepository;
@@ -60,15 +70,20 @@ public class RequestService {
     private final SlaSuspensionService slaSuspensionService;
     private final AuthorizationService authorizationService;
     private final FormValidationRule formValidationRule;
+    private final NotificationService notificationService;
+    private final AuditService auditService;
     private final Clock clock;
 
     public RequestService(RequestRepository requestRepository, RequestFieldValueRepository requestFieldValueRepository,
-                           CatalogService catalogService, WorkflowDefinitionRepository workflowDefinitionRepository,
+                           RequestHistoryRepository requestHistoryRepository, CatalogService catalogService,
+                           WorkflowDefinitionRepository workflowDefinitionRepository,
                            StepRepository stepRepository, TaskAssignmentRepository taskAssignmentRepository,
                            SlaSuspensionService slaSuspensionService, AuthorizationService authorizationService,
-                           FormValidationRule formValidationRule, Clock clock) {
+                           FormValidationRule formValidationRule, NotificationService notificationService,
+                           AuditService auditService, Clock clock) {
         this.requestRepository = requestRepository;
         this.requestFieldValueRepository = requestFieldValueRepository;
+        this.requestHistoryRepository = requestHistoryRepository;
         this.catalogService = catalogService;
         this.workflowDefinitionRepository = workflowDefinitionRepository;
         this.stepRepository = stepRepository;
@@ -76,6 +91,8 @@ public class RequestService {
         this.slaSuspensionService = slaSuspensionService;
         this.authorizationService = authorizationService;
         this.formValidationRule = formValidationRule;
+        this.notificationService = notificationService;
+        this.auditService = auditService;
         this.clock = clock;
     }
 
@@ -141,6 +158,17 @@ public class RequestService {
         request.setSubmittedAt(now);
         request = requestRepository.save(request);
         slaSuspensionService.onStepEntered(request, firstStep, now);
+
+        // §6.8 - "soumission" est l'un des "événements importants" à notifier. Ambiguïté du
+        // destinataire tranchée pragmatiquement (aucun ADR requis, cf. Step 2 de la session) :
+        // à la soumission, personne n'est encore affecté ni n'a de décision à prendre - le
+        // seul destinataire certain est la requérante elle-même, à titre de confirmation.
+        notificationService.notify(actingUser, NotificationType.SUBMISSION, request,
+                "Votre demande " + request.getReference() + " a été soumise", null,
+                Map.of("reference", request.getReference(), "title", request.getTitle()));
+        // RG-11 - changement de statut.
+        auditService.record(actingUser, "SUBMIT", "Request", request.getId().toString(),
+                "status: DRAFT -> SUBMITTED, reference=" + request.getReference());
         return request;
     }
 
@@ -162,6 +190,7 @@ public class RequestService {
             throw new InvalidRequestStateException("ALREADY_TAKEN_CHARGE",
                     "Cette demande est déjà prise en charge et ne peut plus être annulée.");
         }
+        RequestStatus previousStatus = request.getStatus();
         request.setStatus(RequestStatus.CANCELLED);
         // A cancelled-after-submission request must stop offering workflow actions: nulling
         // currentStep is what makes AuthorizationService.canAct (via
@@ -169,13 +198,122 @@ public class RequestService {
         // exactly like a closed request (ADR-03) - without this, a stale currentStep would
         // leave it actionable through WorkflowTransitionService after being cancelled.
         request.setCurrentStep(null);
-        return requestRepository.save(request);
+        request = requestRepository.save(request);
+        // RG-11 - changement de statut.
+        auditService.record(actingUser, "CANCEL", "Request", request.getId().toString(),
+                "status: " + previousStatus + " -> CANCELLED, reference=" + request.getReference());
+        return request;
     }
 
-    /** §6.4 - "son propre dossier" (RG-06) : le seul point d'entrée public pour lire une demande par id. */
+    /**
+     * RG-08/ADR-14 (docs/DECISIONS.md) - rouvre une demande clôturée. Distinct de
+     * WorkflowTransitionService.execute : REOPEN n'est jamais résolue via une Transition de
+     * Step (WorkflowAction.REOPEN's own javadoc), donc ce n'est ni canAct ni
+     * WorkflowActionAvailabilityRule qui décident ici - seulement les trois gardes d'état de
+     * l'ADR (statut, délai, configuration du type de demande) puis
+     * AuthorizationService.canReopen (rôle + périmètre). Reprend exactement à l'étape
+     * quittée par la dernière CLOSE (RequestHistory), jamais une étape reconfigurée
+     * séparément.
+     */
+    @Transactional
+    public Request reopen(User actingUser, Long requestId) {
+        Request request = requestRepository.findById(requestId)
+                .orElseThrow(() -> new EntityNotFoundException("Demande introuvable."));
+        if (request.getStatus() != RequestStatus.CLOSED) {
+            throw new InvalidRequestStateException("NOT_CLOSED",
+                    "Seule une demande clôturée peut être rouverte (RG-08).");
+        }
+        if (!request.getRequestType().isReopenAllowed()) {
+            throw new InvalidRequestStateException("REOPEN_NOT_ALLOWED",
+                    "Ce type de demande ne permet pas la réouverture (RG-08).");
+        }
+        Instant now = clock.instant();
+        if (request.getReopenDeadline() == null || now.isAfter(request.getReopenDeadline())) {
+            throw new InvalidRequestStateException("REOPEN_WINDOW_EXPIRED",
+                    "Le délai de réouverture est dépassé (RG-08).");
+        }
+        Step targetStep = lastCloseFromStep(requestId);
+        // ADR-14 : un canReopen refusé se traduit en 404, exactement comme un canAct refusé
+        // (voir CommentService/AttachmentService pour le même raisonnement).
+        if (!authorizationService.canReopen(actingUser, request, targetStep)) {
+            throw new EntityNotFoundException("Demande introuvable.");
+        }
+
+        request.setStatus(RequestStatus.SUBMITTED);
+        request.setCurrentStep(targetStep);
+        // La fenêtre de réouverture qui vient d'être consommée n'a plus de sens tant que la
+        // demande n'est pas re-close - une nouvelle sera posée à la prochaine CLOSE.
+        request.setReopenDeadline(null);
+        request = requestRepository.save(request);
+
+        // RG-04/§3.4 - une ligne d'historique par transition, REOPEN y compris ; fromStep
+        // null (elle ne part d'aucune étape courante, ADR-03/ADR-14) plutôt que le fromStep
+        // de la CLOSE réutilisée ci-dessus pour toStep, afin de ne pas laisser croire que
+        // REOPEN elle-même est sortie de cette étape.
+        requestHistoryRepository.save(new RequestHistory(request, null, WorkflowAction.REOPEN, targetStep, actingUser));
+
+        if (targetStep != null) {
+            // RG-07 : le compteur SLA n'a jamais formellement cessé (submittedAt reste
+            // l'original) - seule la suspension éventuelle de la nouvelle étape reprise doit
+            // être réévaluée, exactement comme pour toute autre étape entrée.
+            slaSuspensionService.onStepEntered(request, targetStep, now);
+        }
+
+        // RG-11 - changement de statut.
+        auditService.record(actingUser, "REOPEN", "Request", request.getId().toString(),
+                "status: CLOSED -> SUBMITTED, reference=" + request.getReference());
+        return request;
+    }
+
+    /**
+     * §6.9/§9.4 - "vue demandeur : demandes en cours, dernières décisions et délais
+     * annoncés". Contrairement à getDetail/getViewable (ADR-10, canView), cette liste ne
+     * borne jamais l'accès à autre chose que la propriété du dossier (RG-06 "un demandeur
+     * ne voit que ses dossiers") - un rôle complémentaire n'a pas sa place ici, il utilisera
+     * "Mes tâches" (§6.6) ou un tableau de bord (§6.9), pas cette liste-ci. Inclut donc les
+     * brouillons du demandeur, à la différence de getViewable qui les exclut toujours.
+     */
+    @Transactional(readOnly = true)
+    public Page<Request> listMine(User actingUser, RequestStatus status, Pageable pageable) {
+        return status != null
+                ? requestRepository.findByRequesterIdAndStatus(actingUser.getId(), status, pageable)
+                : requestRepository.findByRequesterId(actingUser.getId(), pageable);
+    }
+
+    /**
+     * §6.4 - "Affichage d'une frise d'avancement et de l'historique complet." Même surface
+     * de lecture que getDetail (getViewable : propriétaire ou canView, jamais un simple
+     * brouillon pour un tiers) - l'historique d'un dossier n'est pas plus exposé que le
+     * dossier lui-même.
+     */
+    @Transactional(readOnly = true)
+    public List<RequestHistory> getHistory(User actingUser, Long requestId) {
+        Request request = getViewable(actingUser, requestId);
+        return requestHistoryRepository.findByRequestIdOrderByOccurredAtAsc(request.getId());
+    }
+
+    /**
+     * §6.4/§9.4 - le seul point d'entrée public pour lire une demande par id. RG-06 borne
+     * la lecture à "son propre dossier, sauf rôle complémentaire prévu par l'organisation"
+     * (ADR-10, docs/DECISIONS.md) : contrairement à updateDraft/submit/cancel ci-dessus, qui
+     * restent strictement réservés au demandeur via getOwned, cette méthode admet aussi un
+     * manager/agent/service manager/auditeur dont le périmètre couvre la demande
+     * (AuthorizationService.canView), jamais un simple brouillon (voir getViewable).
+     */
     @Transactional(readOnly = true)
     public RequestDetailView getDetail(User actingUser, Long requestId) {
-        return toDetailView(actingUser, getOwned(actingUser, requestId));
+        return toDetailView(actingUser, getViewable(actingUser, requestId));
+    }
+
+    /**
+     * ADR-11 (docs/DECISIONS.md) - même décision de lecture que getDetail (isRequester ou
+     * canView), exposée pour CommentService/AttachmentService : commentaires et pièces
+     * jointes partagent l'accès en lecture de l'écran détail (§9.4) sans dupliquer cette
+     * résolution 404/canView à chaque nouvel appelant.
+     */
+    @Transactional(readOnly = true)
+    public Request getViewableRequest(User actingUser, Long requestId) {
+        return getViewable(actingUser, requestId);
     }
 
     /**
@@ -187,8 +325,11 @@ public class RequestService {
     public RequestDetailView toDetailView(User actingUser, Request request) {
         Map<String, String> values = requestFieldValueRepository.findByRequestId(request.getId()).stream()
                 .collect(LinkedHashMap::new, (map, value) -> map.put(value.getFormField().getCode(), value.getValue()), Map::putAll);
+        // REOPEN is never resolved through canAct (WorkflowAction.REOPEN's own javadoc): a
+        // CLOSED request has no currentStep, so the loop below would never even reach it -
+        // isReopenEligibleNow is the only path that can add it.
         List<WorkflowAction> availableActions = request.getCurrentStep() == null
-                ? List.of()
+                ? (isReopenEligibleNow(actingUser, request) ? List.of(WorkflowAction.REOPEN) : List.of())
                 : Arrays.stream(WorkflowAction.values())
                         .filter(action -> authorizationService.canAct(actingUser, request, action))
                         .toList();
@@ -212,6 +353,23 @@ public class RequestService {
         return request;
     }
 
+    /**
+     * ADR-10 - lecture seule (getDetail) : la requérante voit toujours son propre dossier
+     * (RG-06 de base), et n'importe quel autre appelant dont AuthorizationService.canView
+     * couvre la demande la voit aussi (canView refuse lui-même un simple brouillon, quel
+     * que soit le périmètre). Ne remplace getOwned nulle part ailleurs : updateDraft/
+     * submit/cancel restent strictement au demandeur.
+     */
+    private Request getViewable(User actingUser, Long requestId) {
+        Request request = requestRepository.findById(requestId)
+                .orElseThrow(() -> new EntityNotFoundException("Demande introuvable."));
+        boolean isRequester = request.getRequester().getId().equals(actingUser.getId());
+        if (!isRequester && !authorizationService.canView(actingUser, request)) {
+            throw new EntityNotFoundException("Demande introuvable.");
+        }
+        return request;
+    }
+
     private Request getOwnedDraft(User actingUser, Long requestId) {
         Request request = getOwned(actingUser, requestId);
         if (request.getStatus() != RequestStatus.DRAFT) {
@@ -219,6 +377,29 @@ public class RequestService {
                     "Cette demande n'est plus modifiable à l'état brouillon.");
         }
         return request;
+    }
+
+    /**
+     * ADR-14 - la même condition que reopen() exige avant d'appeler
+     * AuthorizationService.canReopen, réutilisée ici uniquement pour décider si REOPEN doit
+     * apparaître dans availableActions[] (CLAUDE.md - jamais un bouton depuis le rôle) :
+     * mêmes gardes d'état, jamais dupliquées, seulement relues.
+     */
+    private boolean isReopenEligibleNow(User actingUser, Request request) {
+        return request.getStatus() == RequestStatus.CLOSED
+                && request.getRequestType().isReopenAllowed()
+                && request.getReopenDeadline() != null
+                && !clock.instant().isAfter(request.getReopenDeadline())
+                && authorizationService.canReopen(actingUser, request, lastCloseFromStep(request.getId()));
+    }
+
+    /** RG-08/ADR-14 - l'étape que la dernière CLOSE de cette demande a quittée. */
+    private Step lastCloseFromStep(Long requestId) {
+        return requestHistoryRepository
+                .findFirstByRequestIdAndActionOrderByOccurredAtDesc(requestId, WorkflowAction.CLOSE)
+                .orElseThrow(() -> new InvalidRequestStateException("NO_CLOSE_HISTORY",
+                        "Aucune clôture n'a été retrouvée dans l'historique de cette demande."))
+                .getFromStep();
     }
 
     private void saveFieldValues(Request request, RequestType requestType, Map<String, String> fieldValues) {

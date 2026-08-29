@@ -41,6 +41,14 @@ class RolePermissionRuleTest {
     }
 
     @Test
+    @DisplayName("ADR-14/RG-08 - REOPEN mirrors CLOSE eligibility: AGENT and SERVICE_MANAGER, never MANAGER")
+    void reopenMirrorsCloseEligibility() {
+        assertThat(rule.grants(Role.AGENT, WorkflowAction.REOPEN)).isTrue();
+        assertThat(rule.grants(Role.SERVICE_MANAGER, WorkflowAction.REOPEN)).isTrue();
+        assertThat(rule.grants(Role.MANAGER, WorkflowAction.REOPEN)).isFalse();
+    }
+
+    @Test
     @DisplayName("§5 - Responsable de service pilote toutes les demandes de son service: toutes les actions de workflow")
     void serviceManagerGrantsEveryWorkflowAction() {
         for (WorkflowAction action : WorkflowAction.values()) {

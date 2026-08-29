@@ -1,10 +1,12 @@
 package com.smartflow.backend.crosscutting.security;
 
 import com.smartflow.backend.api.dto.request.LoginRequest;
+import com.smartflow.backend.domain.entity.SystemParameter;
 import com.smartflow.backend.domain.entity.User;
 import com.smartflow.backend.domain.entity.UserRoleAssignment;
 import com.smartflow.backend.domain.enums.Role;
 import com.smartflow.backend.domain.enums.ScopeType;
+import com.smartflow.backend.infrastructure.repository.SystemParameterRepository;
 import com.smartflow.backend.infrastructure.repository.UserRepository;
 import com.smartflow.backend.infrastructure.repository.UserRoleAssignmentRepository;
 import jakarta.servlet.http.Cookie;
@@ -68,6 +70,8 @@ class AuthenticationIT {
     private UserRoleAssignmentRepository userRoleAssignmentRepository;
     @Autowired
     private PasswordEncoder passwordEncoder;
+    @Autowired
+    private SystemParameterRepository systemParameterRepository;
 
     @BeforeEach
     void seedUser() {
@@ -173,6 +177,64 @@ class AuthenticationIT {
         mockMvc.perform(get("/api/v1/auth/me"))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code", equalTo("UNAUTHENTICATED")));
+    }
+
+    @Test
+    @DisplayName("ADR-13 - after max-attempts wrong passwords, the account locks: even the correct password is now refused")
+    void accountLocksAfterMaxFailedAttempts() throws Exception {
+        systemParameterRepository.save(new SystemParameter(LoginAttemptListener.MAX_ATTEMPTS_KEY, "3"));
+        Cookie csrfCookie = fetchCsrfCookie();
+
+        for (int i = 0; i < 3; i++) {
+            mockMvc.perform(post("/api/v1/auth/login")
+                            .header("X-XSRF-TOKEN", csrfCookie.getValue())
+                            .cookie(csrfCookie)
+                            .contentType("application/json")
+                            .content(objectMapper.writeValueAsString(new LoginRequest("ada@example.com", "wrong-password"))))
+                    .andExpect(status().isUnauthorized());
+        }
+
+        // The 3rd wrong attempt above already locked the account (max-attempts=3) - even
+        // the correct password is refused now, with the exact same generic message (§13 -
+        // a locked account must not be distinguishable from a merely-wrong password).
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .header("X-XSRF-TOKEN", csrfCookie.getValue())
+                        .cookie(csrfCookie)
+                        .contentType("application/json")
+                        .content(objectMapper.writeValueAsString(new LoginRequest("ada@example.com", "s3cret-pass"))))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code", equalTo("UNAUTHENTICATED")))
+                .andExpect(jsonPath("$.message", equalTo("Identifiants invalides.")));
+
+        User locked = userRepository.findByEmail("ada@example.com").orElseThrow();
+        assertThat(locked.getLockedUntil()).isNotNull().isAfter(java.time.Instant.now());
+        assertThat(locked.getFailedLoginAttempts()).isZero();
+    }
+
+    @Test
+    @DisplayName("ADR-13 - fewer than max-attempts wrong passwords do not lock the account; a correct login still succeeds")
+    void fewerThanMaxAttemptsDoesNotLockAccount() throws Exception {
+        systemParameterRepository.save(new SystemParameter(LoginAttemptListener.MAX_ATTEMPTS_KEY, "5"));
+        Cookie csrfCookie = fetchCsrfCookie();
+
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .header("X-XSRF-TOKEN", csrfCookie.getValue())
+                        .cookie(csrfCookie)
+                        .contentType("application/json")
+                        .content(objectMapper.writeValueAsString(new LoginRequest("ada@example.com", "wrong-password"))))
+                .andExpect(status().isUnauthorized());
+
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .header("X-XSRF-TOKEN", csrfCookie.getValue())
+                        .cookie(csrfCookie)
+                        .contentType("application/json")
+                        .content(objectMapper.writeValueAsString(new LoginRequest("ada@example.com", "s3cret-pass"))))
+                .andExpect(status().isOk());
+
+        // A successful login resets the counter (ADR-13), not just leaves it below threshold.
+        User user = userRepository.findByEmail("ada@example.com").orElseThrow();
+        assertThat(user.getFailedLoginAttempts()).isZero();
+        assertThat(user.getLockedUntil()).isNull();
     }
 
     /** One GET, one resulting cookie - reused as both the request cookie and the X-XSRF-TOKEN header value it must match. */

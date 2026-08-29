@@ -5,6 +5,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 
+import java.util.List;
 import java.util.Optional;
 
 public interface TaskAssignmentRepository extends JpaRepository<TaskAssignment, Long> {
@@ -16,4 +17,8 @@ public interface TaskAssignmentRepository extends JpaRepository<TaskAssignment, 
     Page<TaskAssignment> findByAssignedUserIdAndActiveTrue(Long assignedUserId, Pageable pageable);
 
     Page<TaskAssignment> findByAssignedTeamIdAndActiveTrue(Long assignedTeamId, Pageable pageable);
+
+    // §6.9 - "délai moyen de prise en charge" (DashboardService) : toutes les affectations
+    // (pas seulement l'active) d'un lot de demandes, pour retenir la première par demande.
+    List<TaskAssignment> findByRequestIdIn(List<Long> requestIds);
 }

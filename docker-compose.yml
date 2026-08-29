@@ -28,6 +28,8 @@ services:
       SMARTFLOW_MAIL_HOST: mailhog
       SMARTFLOW_AI_BASE_URL: http://ai:5000
       SMARTFLOW_AI_ENABLED: ${AI_ENABLED:-false}
+      # RG-09/§13 - doit correspondre au volume nommé `attachments` monté ci-dessous.
+      ATTACHMENTS_DIR: /var/smartflow/attachments
       # ADR-01 exige un cookie de session "Secure" (TLS uniquement), mais rien dans cette
       # pile ne termine de TLS (§15.1 - dev/intégration/recette servis en clair) : un cookie
       # Secure y serait simplement jamais renvoyé par le navigateur, ce qui casserait la
@@ -36,6 +38,11 @@ services:
       SESSION_COOKIE_SECURE: "false"
     ports:
       - "8080:8080"
+    volumes:
+      # RG-09/§13 - stockage des pièces jointes hors répertoire public : un volume nommé
+      # plutôt qu'un bind mount, pour qu'il survive à la reconstruction du conteneur sans
+      # jamais être servi par le reverse proxy (frontend/nginx.conf ne le référence pas).
+      - attachments:/var/smartflow/attachments
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8080/actuator/health"]
       interval: 15s
@@ -70,3 +77,4 @@ services:
 
 volumes:
   pgdata:
+  attachments:

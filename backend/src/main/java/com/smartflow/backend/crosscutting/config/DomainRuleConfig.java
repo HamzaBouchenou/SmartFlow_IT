@@ -1,12 +1,15 @@
 package com.smartflow.backend.crosscutting.config;
 
+import com.smartflow.backend.domain.rule.AttachmentValidationRule;
 import com.smartflow.backend.domain.rule.CommentRequirementRule;
 import com.smartflow.backend.domain.rule.FormValidationRule;
+import com.smartflow.backend.domain.rule.MandatoryNotificationRule;
 import com.smartflow.backend.domain.rule.RolePermissionRule;
 import com.smartflow.backend.domain.rule.ScopeRule;
 import com.smartflow.backend.domain.rule.SeparationOfDutiesRule;
 import com.smartflow.backend.domain.rule.SlaCalculator;
 import com.smartflow.backend.domain.rule.SlaSuspensionRule;
+import com.smartflow.backend.domain.rule.SlaThresholdTransitionRule;
 import com.smartflow.backend.domain.rule.TransitionResolutionRule;
 import com.smartflow.backend.domain.rule.WorkflowActionAvailabilityRule;
 import org.springframework.context.annotation.Bean;
@@ -63,5 +66,20 @@ public class DomainRuleConfig {
     @Bean
     public CommentRequirementRule commentRequirementRule() {
         return new CommentRequirementRule();
+    }
+
+    @Bean
+    public AttachmentValidationRule attachmentValidationRule() {
+        return new AttachmentValidationRule();
+    }
+
+    @Bean
+    public MandatoryNotificationRule mandatoryNotificationRule() {
+        return new MandatoryNotificationRule();
+    }
+
+    @Bean
+    public SlaThresholdTransitionRule slaThresholdTransitionRule() {
+        return new SlaThresholdTransitionRule();
     }
 }

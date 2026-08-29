@@ -3,8 +3,9 @@
 # et compilation, exécution des tests unitaires et d'intégration - pour les trois
 # composants du dépôt. Il ne couvre pas encore :
 #   - l'étape 3 (analyse des dépendances / qualité de code) : aucun outil n'est choisi ;
-#   - l'étape 4 (construction des images Docker taguées depuis Git) : backend/Dockerfile
-#     et frontend/Dockerfile sont vides à ce stade (seul ai-service/Dockerfile existe) ;
+#   - l'étape 4 (construction des images Docker taguées depuis Git) : les trois Dockerfile
+#     existent (backend, frontend, ai-service) mais aucune image n'est encore poussée vers
+#     un registre ni taguée depuis Git par ce workflow ;
 #   - les étapes 5-6 (déploiement, secrets) : hors périmètre de l'intégration continue,
 #     et un déploiement automatisé n'est de toute façon prévu par §15.2 qu'"après
 #     stabilisation".
@@ -15,9 +16,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
-    branches: [main]
+    branches: [main, dev]
 
 jobs:
   backend:
@@ -72,10 +73,12 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      # §14 - "tests front-end" (Vitest/Jest, React Testing Library) n'ont pas encore de
-      # suite écrite ; `npm run build` couvre à ce stade la vérification de format et de
-      # compilation du §15.2 (tsc -b && vite build). `npm test` rejoindra cette étape dès
-      # qu'un premier composant testable existe.
+      # §14 - "tests front-end" (Vitest, React Testing Library) : composants critiques
+      # (ActionBar - CLAUDE.md "jamais un bouton depuis le rôle", DynamicFormField).
+      - name: Test
+        run: npm test
+
+      # §15.2 étape 1 - vérification du format et compilation (tsc -b && vite build).
       - name: Type-check and build
         run: npm run build
 

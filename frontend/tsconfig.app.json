@@ -22,5 +22,10 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src"]
+  "include": ["src"],
+  // Les fichiers de test ne sont pas construits par `vite build` (tsc -b ici) - Vitest les
+  // transpile lui-même (esbuild, sans vérification de type) via vite.config.ts ; les
+  // exclure évite que le build de production échoue sur des types propres à Vitest/
+  // Testing Library qui ne concernent que les tests.
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx", "src/test"]
 }

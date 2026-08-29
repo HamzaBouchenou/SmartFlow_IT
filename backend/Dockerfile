@@ -26,7 +26,18 @@ WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends wget \
     && rm -rf /var/lib/apt/lists/* \
-    && useradd --system --no-create-home smartflow
+    && useradd --system --no-create-home smartflow \
+    # RG-09/§13 - le volume nommé `attachments` de docker-compose.yml se monte sur ce
+    # chemin (smartflow.attachments.storage-dir) ; Docker crée un volume nommé fraîchement
+    # créé en copiant ce que l'image contient déjà à ce chemin, propriétaire compris. Sans
+    # ce répertoire pré-créé et cédé à `smartflow` ici, Docker le crée appartenant à root
+    # (aucune image ne le possède avant), illisible en écriture par le process non-root qui
+    # tourne réellement (USER smartflow ci-dessous) - AttachmentStorage échouerait alors sur
+    # chaque dépôt avec un AccessDeniedException, constaté en conditions réelles (docker
+    # compose up), pas seulement en Testcontainers où smartflow.attachments.storage-dir
+    # pointe vers un répertoire temporaire déjà possédé par l'utilisateur qui lance mvn.
+    && mkdir -p /var/smartflow/attachments \
+    && chown -R smartflow:smartflow /var/smartflow
 
 COPY --from=build /app/target/backend-*.jar app.jar
 
