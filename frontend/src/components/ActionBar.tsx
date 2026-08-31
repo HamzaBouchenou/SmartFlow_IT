@@ -21,8 +21,10 @@ export function ActionBar({ actions, onExecute }: ActionBarProps) {
   const [comment, setComment] = useState('');
   const [closureReason, setClosureReason] = useState('');
   const [closureSolution, setClosureSolution] = useState('');
+  const [satisfactionRating, setSatisfactionRating] = useState('');
   const [assignedUserId, setAssignedUserId] = useState('');
   const [assignedTeamId, setAssignedTeamId] = useState('');
+  const [autoAssign, setAutoAssign] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   if (actions.length === 0) {
@@ -34,8 +36,10 @@ export function ActionBar({ actions, onExecute }: ActionBarProps) {
     setComment('');
     setClosureReason('');
     setClosureSolution('');
+    setSatisfactionRating('');
     setAssignedUserId('');
     setAssignedTeamId('');
+    setAutoAssign(false);
   }
 
   async function confirm(action: WorkflowAction) {
@@ -46,8 +50,10 @@ export function ActionBar({ actions, onExecute }: ActionBarProps) {
         comment: comment || null,
         closureReason: action === 'CLOSE' ? closureReason : null,
         closureSolution: action === 'CLOSE' ? closureSolution : null,
-        assignedUserId: action === 'ASSIGN' && assignedUserId ? Number(assignedUserId) : null,
+        satisfactionRating: action === 'CLOSE' && satisfactionRating ? Number(satisfactionRating) : null,
+        assignedUserId: action === 'ASSIGN' && !autoAssign && assignedUserId ? Number(assignedUserId) : null,
         assignedTeamId: action === 'ASSIGN' && assignedTeamId ? Number(assignedTeamId) : null,
+        autoAssign: action === 'ASSIGN' ? autoAssign : false,
       });
       resetForm();
     } finally {
@@ -97,6 +103,19 @@ export function ActionBar({ actions, onExecute }: ActionBarProps) {
                 value={closureSolution}
                 onChange={(event) => setClosureSolution(event.target.value)}
               />
+              <label htmlFor="satisfaction-rating">Niveau de satisfaction (facultatif)</label>
+              <select
+                id="satisfaction-rating"
+                value={satisfactionRating}
+                onChange={(event) => setSatisfactionRating(event.target.value)}
+              >
+                <option value="">Non renseigné</option>
+                <option value="1">1 - très insatisfait</option>
+                <option value="2">2 - insatisfait</option>
+                <option value="3">3 - neutre</option>
+                <option value="4">4 - satisfait</option>
+                <option value="5">5 - très satisfait</option>
+              </select>
             </>
           ) : (
             <>
@@ -116,15 +135,20 @@ export function ActionBar({ actions, onExecute }: ActionBarProps) {
           {openAction === 'ASSIGN' && (
             <>
               <p className="field-help">
-                Laisser vide pour prendre la demande en charge soi-même, ou renseigner un agent OU une équipe.
+                Laisser tout vide pour prendre la demande en charge soi-même, renseigner un agent précis, ou une
+                équipe (avec ou sans affectation automatique au membre le moins chargé).
               </p>
-              <label htmlFor="assigned-user-id">Identifiant de l'agent</label>
-              <input
-                id="assigned-user-id"
-                type="number"
-                value={assignedUserId}
-                onChange={(event) => setAssignedUserId(event.target.value)}
-              />
+              {!autoAssign && (
+                <>
+                  <label htmlFor="assigned-user-id">Identifiant de l'agent</label>
+                  <input
+                    id="assigned-user-id"
+                    type="number"
+                    value={assignedUserId}
+                    onChange={(event) => setAssignedUserId(event.target.value)}
+                  />
+                </>
+              )}
               <label htmlFor="assigned-team-id">Identifiant de l'équipe</label>
               <input
                 id="assigned-team-id"
@@ -132,6 +156,14 @@ export function ActionBar({ actions, onExecute }: ActionBarProps) {
                 value={assignedTeamId}
                 onChange={(event) => setAssignedTeamId(event.target.value)}
               />
+              <label className="checkbox-label">
+                <input
+                  type="checkbox"
+                  checked={autoAssign}
+                  onChange={(event) => setAutoAssign(event.target.checked)}
+                />
+                Affectation automatique au membre le moins chargé de l'équipe
+              </label>
             </>
           )}
 

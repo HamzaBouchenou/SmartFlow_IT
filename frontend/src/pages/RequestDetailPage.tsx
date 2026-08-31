@@ -163,6 +163,24 @@ export function RequestDetailPage() {
             <dd>{formatDate(request.reopenDeadline)}</dd>
           </>
         )}
+        {request.closureReason && (
+          <>
+            <dt>Motif de clôture</dt>
+            <dd>{request.closureReason}</dd>
+          </>
+        )}
+        {request.closureSolution && (
+          <>
+            <dt>Solution apportée</dt>
+            <dd>{request.closureSolution}</dd>
+          </>
+        )}
+        {request.satisfactionRating !== null && (
+          <>
+            <dt>Niveau de satisfaction</dt>
+            <dd>{request.satisfactionRating} / 5</dd>
+          </>
+        )}
       </dl>
 
       {Object.keys(request.fieldValues).length > 0 && (

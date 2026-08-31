@@ -306,6 +306,43 @@ class RequestTransitionControllerIT {
                 .andExpect(status().isNotFound());
     }
 
+    @Test
+    @DisplayName("§6.4 - niveau de satisfaction facultatif, saisi et validé à la clôture")
+    void satisfactionRatingIsOptionalAtClosureAndValidated() throws Exception {
+        Long id = advanceToValidation();
+        mockMvc.perform(transition(id, asManager, "VALIDATE", null, null, null)).andExpect(status().isOk());
+
+        // facultatif : une clôture sans note reste valide, satisfactionRating reste null.
+        Long noRatingId = advanceToValidation();
+        mockMvc.perform(transition(noRatingId, asManager, "VALIDATE", null, null, null)).andExpect(status().isOk());
+        mockMvc.perform(transitionWithRating(noRatingId, asAgent, "CLOSE", "Résolu", "Remplacé", null))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.satisfactionRating").doesNotExist());
+
+        // hors échelle 1-5 : rejeté.
+        mockMvc.perform(transitionWithRating(id, asAgent, "CLOSE", "Résolu", "Remplacé", 6))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("INVALID_SATISFACTION_RATING"));
+
+        mockMvc.perform(transitionWithRating(id, asAgent, "CLOSE", "Résolu", "Remplacé", 4))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.satisfactionRating").value(4));
+
+        assertThat(requestRepository.findById(id).orElseThrow().getSatisfactionRating()).isEqualTo(4);
+    }
+
+    private org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder transitionWithRating(
+            Long id, UserDetails as, String action, String closureReason, String closureSolution, Integer satisfactionRating)
+            throws Exception {
+        Map<String, Object> body = new java.util.HashMap<>();
+        body.put("action", action);
+        body.put("closureReason", closureReason);
+        body.put("closureSolution", closureSolution);
+        body.put("satisfactionRating", satisfactionRating);
+        return post("/api/v1/requests/{id}/transitions", id).with(user(as)).with(csrf())
+                .contentType("application/json").content(objectMapper.writeValueAsString(body));
+    }
+
     private Long advanceToValidation() throws Exception {
         Long id = createAndSubmit(asRequester);
         mockMvc.perform(transition(id, asAgent, "ASSIGN", null, null, null)).andExpect(status().isOk());

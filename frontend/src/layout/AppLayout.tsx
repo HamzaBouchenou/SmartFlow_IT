@@ -15,6 +15,9 @@ export function AppLayout() {
       <header className="app-header">
         <span className="app-title">SmartFlow IT</span>
         <nav>
+          <NavLink to="/" end>
+            Accueil
+          </NavLink>
           <NavLink to="/catalogue">Catalogue</NavLink>
           <NavLink to="/mes-demandes">Mes demandes</NavLink>
           <NavLink to="/mes-taches">Mes tâches</NavLink>
@@ -23,9 +26,9 @@ export function AppLayout() {
         </nav>
         <div className="app-user">
           <NotificationBell />
-          <span>
+          <NavLink to="/profil">
             {user?.firstName} {user?.lastName}
-          </span>
+          </NavLink>
           <button type="button" onClick={() => void logout()}>
             Déconnexion
           </button>

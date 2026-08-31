@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import * as tasksApi from '../api/tasks';
-import type { PageResponse, Priority, RequestStatus, RequestSummaryResponse } from '../api/types';
+import type { BulkActionResultResponse, PageResponse, Priority, RequestStatus, RequestSummaryResponse } from '../api/types';
 import { ErrorBanner } from '../components/ErrorBanner';
 import { formatDate, statusLabel } from '../lib/format';
 
@@ -22,6 +22,18 @@ export function TasksPage() {
   const [result, setResult] = useState<PageResponse<RequestSummaryResponse> | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [loading, setLoading] = useState(true);
+
+  // §6.6 - "Actions en masse limitées aux changements ne présentant pas de risque
+  // fonctionnel" : sélection multi-lignes, uniquement pour ré-affecter (jamais valider/
+  // rejeter/clôturer en masse - BulkAssignmentService.java n'expose que ASSIGN).
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [bulkAssignedUserId, setBulkAssignedUserId] = useState('');
+  const [bulkAssignedTeamId, setBulkAssignedTeamId] = useState('');
+  const [bulkAutoAssign, setBulkAutoAssign] = useState(false);
+  const [bulkSubmitting, setBulkSubmitting] = useState(false);
+  const [bulkResult, setBulkResult] = useState<BulkActionResultResponse | null>(null);
+  const [bulkError, setBulkError] = useState<unknown>(null);
+  const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -54,11 +66,56 @@ export function TasksPage() {
     return () => {
       cancelled = true;
     };
-  }, [queue, status, priority, overdue, page]);
+  }, [queue, status, priority, overdue, page, reloadToken]);
 
   function switchQueue(next: Queue) {
     setQueue(next);
     setPage(0);
+    setSelected(new Set());
+    setBulkResult(null);
+  }
+
+  function toggleSelected(id: number) {
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    if (!result) {
+      return;
+    }
+    setSelected((current) =>
+      current.size === result.content.length ? new Set() : new Set(result.content.map((item) => item.id)),
+    );
+  }
+
+  async function submitBulkAssign(event: React.FormEvent) {
+    event.preventDefault();
+    setBulkSubmitting(true);
+    setBulkError(null);
+    setBulkResult(null);
+    try {
+      const response = await tasksApi.bulkAssign({
+        requestIds: Array.from(selected),
+        assignedUserId: !bulkAutoAssign && bulkAssignedUserId ? Number(bulkAssignedUserId) : null,
+        assignedTeamId: bulkAssignedTeamId ? Number(bulkAssignedTeamId) : null,
+        autoAssign: bulkAutoAssign,
+      });
+      setBulkResult(response);
+      setSelected(new Set());
+      setReloadToken((current) => current + 1);
+    } catch (bulkSubmitError) {
+      setBulkError(bulkSubmitError);
+    } finally {
+      setBulkSubmitting(false);
+    }
   }
 
   return (
@@ -119,11 +176,69 @@ export function TasksPage() {
       <ErrorBanner error={error} />
       {loading && <p className="page-loading">Chargement…</p>}
 
+      {selected.size > 0 && (
+        <form className="bulk-actions-bar" onSubmit={(event) => void submitBulkAssign(event)}>
+          <strong>{selected.size} sélectionnée(s)</strong>
+          {!bulkAutoAssign && (
+            <input
+              type="number"
+              placeholder="Id agent"
+              aria-label="Identifiant de l'agent"
+              value={bulkAssignedUserId}
+              onChange={(event) => setBulkAssignedUserId(event.target.value)}
+            />
+          )}
+          <input
+            type="number"
+            placeholder="Id équipe"
+            aria-label="Identifiant de l'équipe"
+            value={bulkAssignedTeamId}
+            onChange={(event) => setBulkAssignedTeamId(event.target.value)}
+          />
+          <label className="checkbox-label">
+            <input
+              type="checkbox"
+              checked={bulkAutoAssign}
+              onChange={(event) => setBulkAutoAssign(event.target.checked)}
+            />
+            Affectation automatique
+          </label>
+          <button type="submit" disabled={bulkSubmitting}>
+            Affecter la sélection
+          </button>
+        </form>
+      )}
+      {bulkError !== null && <ErrorBanner error={bulkError} />}
+      {bulkResult && (
+        <p className="field-help">
+          {bulkResult.results.filter((item) => item.success).length} affectation(s) réussie(s) sur{' '}
+          {bulkResult.results.length}
+          {bulkResult.results.some((item) => !item.success) && (
+            <>
+              {' '}
+              — échecs :{' '}
+              {bulkResult.results
+                .filter((item) => !item.success)
+                .map((item) => `#${item.requestId} (${item.errorCode})`)
+                .join(', ')}
+            </>
+          )}
+        </p>
+      )}
+
       {result && (
         <>
           <table className="task-table">
             <thead>
               <tr>
+                <th>
+                  <input
+                    type="checkbox"
+                    aria-label="Tout sélectionner"
+                    checked={result.content.length > 0 && selected.size === result.content.length}
+                    onChange={toggleSelectAll}
+                  />
+                </th>
                 <th>Référence</th>
                 <th>Titre</th>
                 <th>Statut</th>
@@ -138,6 +253,14 @@ export function TasksPage() {
               {result.content.map((item) => (
                 <tr key={item.id}>
                   <td>
+                    <input
+                      type="checkbox"
+                      aria-label={`Sélectionner ${item.reference}`}
+                      checked={selected.has(item.id)}
+                      onChange={() => toggleSelected(item.id)}
+                    />
+                  </td>
+                  <td>
                     <Link to={`/demandes/${item.id}`}>{item.reference}</Link>
                   </td>
                   <td>{item.title}</td>
@@ -151,7 +274,7 @@ export function TasksPage() {
               ))}
               {result.content.length === 0 && (
                 <tr>
-                  <td colSpan={8}>Aucune tâche dans cette file.</td>
+                  <td colSpan={9}>Aucune tâche dans cette file.</td>
                 </tr>
               )}
             </tbody>

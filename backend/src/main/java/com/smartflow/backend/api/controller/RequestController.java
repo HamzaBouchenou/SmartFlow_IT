@@ -120,7 +120,8 @@ public class RequestController {
     public RequestDetailResponse executeTransition(@AuthenticationPrincipal SmartFlowUserDetails principal,
                                                      @PathVariable Long id, @Valid @RequestBody ExecuteTransitionRequest body) {
         Request request = workflowTransitionService.execute(principal.getUser(), id, body.action(), body.comment(),
-                body.closureReason(), body.closureSolution(), body.assignedUserId(), body.assignedTeamId());
+                body.closureReason(), body.closureSolution(), body.satisfactionRating(),
+                body.assignedUserId(), body.assignedTeamId(), body.isAutoAssign());
         return RequestMapper.toResponse(requestService.toDetailView(principal.getUser(), request));
     }
 

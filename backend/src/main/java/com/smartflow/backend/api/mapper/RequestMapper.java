@@ -29,7 +29,8 @@ public final class RequestMapper {
                 assignedUser != null ? assignedUser.getId() : null, fullName(assignedUser),
                 assignedTeam != null ? assignedTeam.getId() : null, assignedTeam != null ? assignedTeam.getName() : null,
                 request.getSlaStatus() != null ? request.getSlaStatus().name() : null,
-                request.getSlaDueAtFirstResponse(), request.getSlaDueAtResolution(), request.getReopenDeadline());
+                request.getSlaDueAtFirstResponse(), request.getSlaDueAtResolution(), request.getReopenDeadline(),
+                request.getClosureReason(), request.getClosureSolution(), request.getSatisfactionRating());
     }
 
     /** §6.6 - une ligne de file de travail : voir RequestSummaryResponse pour ce qu'une liste n'a pas besoin de porter. */

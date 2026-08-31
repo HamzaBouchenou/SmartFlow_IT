@@ -47,6 +47,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import tools.jackson.databind.ObjectMapper;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -104,7 +105,9 @@ class TaskQueueControllerIT {
     private RequestType requestType;
     private Team team1;
     private User requester1;
+    private User agentA;
     private UserDetails asAgentA;
+    private User agentB;
     private UserDetails asAgentB;
     private UserDetails asRequester1;
 
@@ -122,15 +125,19 @@ class TaskQueueControllerIT {
         Step qualification = stepRepository.save(withTeam(new Step(workflow, "QUALIFICATION", "Qualification"), team1, 1));
         Step traitement = stepRepository.save(withTeam(new Step(workflow, "TRAITEMENT", "Traitement"), team1, 2));
         transitionRepository.save(new Transition(qualification, WorkflowAction.ASSIGN, traitement));
+        // Sans transition sortante de "traitement", WorkflowActionAvailabilityRule refuse
+        // toute action à quiconque une fois la demande déplacée là - y compris canAct pour
+        // l'éligibilité d'affectation automatique, qui teste chaque action possible.
+        transitionRepository.save(new Transition(traitement, WorkflowAction.CLOSE, null));
 
         requester1 = userRepository.save(new User("Amina", "Idrissi", "amina.tq@example.com", "hash"));
         asRequester1 = new SmartFlowUserDetails(requester1, Set.of(Role.REQUESTER));
 
-        User agentA = userRepository.save(new User("Sara", "Bennis", "sara.tq@example.com", "hash"));
+        agentA = userRepository.save(new User("Sara", "Bennis", "sara.tq@example.com", "hash"));
         userRoleAssignmentRepository.save(new UserRoleAssignment(agentA, Role.AGENT, ScopeType.TEAM, team1.getId()));
         asAgentA = new SmartFlowUserDetails(agentA, Set.of(Role.AGENT));
 
-        User agentB = userRepository.save(new User("Karim", "El Fassi", "karim.tq@example.com", "hash"));
+        agentB = userRepository.save(new User("Karim", "El Fassi", "karim.tq@example.com", "hash"));
         userRoleAssignmentRepository.save(new UserRoleAssignment(agentB, Role.AGENT, ScopeType.TEAM, team1.getId()));
         asAgentB = new SmartFlowUserDetails(agentB, Set.of(Role.AGENT));
     }
@@ -227,6 +234,71 @@ class TaskQueueControllerIT {
         mockMvc.perform(get("/api/v1/tasks/mine").param("overdue", "true").with(user(asAgentA)))
                 .andExpect(jsonPath("$.totalElements").value(1))
                 .andExpect(jsonPath("$.content[0].id").value(overdue));
+    }
+
+    @Test
+    @DisplayName("§6.6 - affectation automatique : choisit le membre le moins chargé de l'équipe")
+    void autoAssignPicksLeastLoadedTeamMember() throws Exception {
+        Long id = createAndSubmit(requester1);
+
+        Map<String, Object> body = Map.of("action", "ASSIGN", "assignedTeamId", team1.getId(), "autoAssign", true);
+        mockMvc.perform(post("/api/v1/requests/{id}/transitions", id).with(user(asAgentA)).with(csrf())
+                        .contentType("application/json").content(objectMapper.writeValueAsString(body)))
+                .andExpect(status().isOk())
+                // les deux agents partent à charge égale (0) : le départage retient le plus petit id.
+                .andExpect(jsonPath("$.assignedUserId").value(agentA.getId()));
+    }
+
+    @Test
+    @DisplayName("§6.6 - affectation automatique : assignedUserId et autoAssign ensemble sont rejetés")
+    void autoAssignWithExplicitUserIsRejected() throws Exception {
+        Long id = createAndSubmit(requester1);
+
+        Map<String, Object> body = Map.of("action", "ASSIGN", "assignedUserId", agentA.getId(), "autoAssign", true);
+        mockMvc.perform(post("/api/v1/requests/{id}/transitions", id).with(user(asAgentA)).with(csrf())
+                        .contentType("application/json").content(objectMapper.writeValueAsString(body)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("AUTO_ASSIGN_REQUIRES_TEAM"));
+    }
+
+    @Test
+    @DisplayName("§6.6 - action en masse : affectation automatique équilibrée sur plusieurs demandes, un échec par id n'affecte pas les autres")
+    void bulkAssignBalancesLoadAndIsolatesFailures() throws Exception {
+        Long first = createAndSubmit(requester1);
+        Long second = createAndSubmit(requester1);
+
+        Map<String, Object> body = Map.of("requestIds", List.of(first, second, 999999L),
+                "assignedTeamId", team1.getId(), "autoAssign", true);
+        mockMvc.perform(post("/api/v1/tasks/bulk-assign").with(user(asAgentA)).with(csrf())
+                        .contentType("application/json").content(objectMapper.writeValueAsString(body)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.results[0].requestId").value(first))
+                .andExpect(jsonPath("$.results[0].success").value(true))
+                .andExpect(jsonPath("$.results[1].requestId").value(second))
+                .andExpect(jsonPath("$.results[1].success").value(true))
+                .andExpect(jsonPath("$.results[2].requestId").value(999999))
+                .andExpect(jsonPath("$.results[2].success").value(false))
+                .andExpect(jsonPath("$.results[2].errorCode").value("NOT_FOUND"));
+
+        // la charge se répartit : le second dossier va au coéquipier resté à charge nulle après le premier.
+        mockMvc.perform(get("/api/v1/tasks/mine").with(user(asAgentA)))
+                .andExpect(jsonPath("$.totalElements").value(1));
+        mockMvc.perform(get("/api/v1/tasks/mine").with(user(asAgentB)))
+                .andExpect(jsonPath("$.totalElements").value(1));
+    }
+
+    private Long createAndSubmit(User requester) throws Exception {
+        UserDetails asRequester = new SmartFlowUserDetails(requester, Set.of(Role.REQUESTER));
+        String createBody = objectMapper.writeValueAsString(Map.of(
+                "requestTypeId", requestType.getId(), "title", "Remplacement clavier", "fieldValues", Map.of()));
+        MvcResult created = mockMvc.perform(post("/api/v1/requests").with(user(asRequester)).with(csrf())
+                        .contentType("application/json").content(createBody))
+                .andExpect(status().isCreated())
+                .andReturn();
+        Long id = objectMapper.readTree(created.getResponse().getContentAsString()).get("id").asLong();
+        mockMvc.perform(post("/api/v1/requests/{id}/submit", id).with(user(asRequester)).with(csrf()))
+                .andExpect(status().isOk());
+        return id;
     }
 
     private Long createSubmitAndAssign(User requester, String mode, Long teamId) throws Exception {

@@ -15,6 +15,8 @@ import com.smartflow.backend.domain.enums.RequestStatus;
 import com.smartflow.backend.domain.enums.WorkflowAction;
 import com.smartflow.backend.domain.exception.EntityNotFoundException;
 import com.smartflow.backend.domain.exception.InvalidRequestStateException;
+import com.smartflow.backend.domain.enums.ScopeType;
+import com.smartflow.backend.domain.rule.AutoAssignmentRule;
 import com.smartflow.backend.domain.rule.CommentRequirementRule;
 import com.smartflow.backend.domain.rule.TransitionResolutionRule;
 import com.smartflow.backend.domain.rule.TransitionResolutionRule.CandidateTransition;
@@ -28,6 +30,7 @@ import com.smartflow.backend.infrastructure.repository.TaskAssignmentRepository;
 import com.smartflow.backend.infrastructure.repository.TeamRepository;
 import com.smartflow.backend.infrastructure.repository.TransitionRepository;
 import com.smartflow.backend.infrastructure.repository.UserRepository;
+import com.smartflow.backend.infrastructure.repository.UserRoleAssignmentRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -65,10 +68,12 @@ public class WorkflowTransitionService {
     private final TaskAssignmentRepository taskAssignmentRepository;
     private final UserRepository userRepository;
     private final TeamRepository teamRepository;
+    private final UserRoleAssignmentRepository userRoleAssignmentRepository;
     private final AuthorizationService authorizationService;
     private final SlaSuspensionService slaSuspensionService;
     private final TransitionResolutionRule transitionResolutionRule;
     private final CommentRequirementRule commentRequirementRule;
+    private final AutoAssignmentRule autoAssignmentRule;
     private final NotificationService notificationService;
     private final AuditService auditService;
     private final SystemParameterRepository systemParameterRepository;
@@ -82,10 +87,12 @@ public class WorkflowTransitionService {
                                       StepRepository stepRepository, RequestFieldValueRepository requestFieldValueRepository,
                                       RequestHistoryRepository requestHistoryRepository,
                                       TaskAssignmentRepository taskAssignmentRepository, UserRepository userRepository,
-                                      TeamRepository teamRepository, AuthorizationService authorizationService,
+                                      TeamRepository teamRepository, UserRoleAssignmentRepository userRoleAssignmentRepository,
+                                      AuthorizationService authorizationService,
                                       SlaSuspensionService slaSuspensionService,
                                       TransitionResolutionRule transitionResolutionRule,
-                                      CommentRequirementRule commentRequirementRule, NotificationService notificationService,
+                                      CommentRequirementRule commentRequirementRule, AutoAssignmentRule autoAssignmentRule,
+                                      NotificationService notificationService,
                                       AuditService auditService, SystemParameterRepository systemParameterRepository, Clock clock) {
         this.requestRepository = requestRepository;
         this.transitionRepository = transitionRepository;
@@ -95,9 +102,11 @@ public class WorkflowTransitionService {
         this.taskAssignmentRepository = taskAssignmentRepository;
         this.userRepository = userRepository;
         this.teamRepository = teamRepository;
+        this.userRoleAssignmentRepository = userRoleAssignmentRepository;
         this.authorizationService = authorizationService;
         this.slaSuspensionService = slaSuspensionService;
         this.transitionResolutionRule = transitionResolutionRule;
+        this.autoAssignmentRule = autoAssignmentRule;
         this.commentRequirementRule = commentRequirementRule;
         this.notificationService = notificationService;
         this.systemParameterRepository = systemParameterRepository;
@@ -107,22 +116,24 @@ public class WorkflowTransitionService {
 
     /**
      * §6.5/RG-04 : exécute action sur requestId pour actingUser. closureReason/
-     * closureSolution ne sont lus que pour action = CLOSE (§6.4 - "Clôture avec motif,
-     * solution apportée..."), ignorés sinon. assignedUserId/assignedTeamId (§6.6) ne sont
-     * lus que pour ASSIGN, voir ExecuteTransitionRequest.
+     * closureSolution/satisfactionRating ne sont lus que pour action = CLOSE (§6.4 -
+     * "Clôture avec motif, solution apportée..."), ignorés sinon. assignedUserId/
+     * assignedTeamId/autoAssign (§6.6) ne sont lus que pour ASSIGN, voir
+     * ExecuteTransitionRequest.
      */
     @Transactional
     public Request execute(User actingUser, Long requestId, WorkflowAction action, String comment,
-                            String closureReason, String closureSolution, Long assignedUserId, Long assignedTeamId) {
+                            String closureReason, String closureSolution, Integer satisfactionRating,
+                            Long assignedUserId, Long assignedTeamId, boolean autoAssign) {
         Request request = requestRepository.findById(requestId)
                 .orElseThrow(() -> new EntityNotFoundException("Demande introuvable."));
         if (!authorizationService.canAct(actingUser, request, action)) {
             throw new EntityNotFoundException("Demande introuvable.");
         }
         commentRequirementRule.validate(action, comment);
-        if (action != WorkflowAction.ASSIGN && (assignedUserId != null || assignedTeamId != null)) {
+        if (action != WorkflowAction.ASSIGN && (assignedUserId != null || assignedTeamId != null || autoAssign)) {
             throw new InvalidRequestStateException("ASSIGNEE_NOT_APPLICABLE",
-                    "assignedUserId/assignedTeamId ne s'appliquent qu'à l'action ASSIGN.");
+                    "assignedUserId/assignedTeamId/autoAssign ne s'appliquent qu'à l'action ASSIGN.");
         }
 
         // canAct returning true already guarantees a non-null currentStep with at least one
@@ -135,12 +146,12 @@ public class WorkflowTransitionService {
         User newlyAssignedUser = null;
         if (action == WorkflowAction.CLOSE) {
             toStep = null;
-            closeRequest(request, closureReason, closureSolution, now);
+            closeRequest(request, closureReason, closureSolution, satisfactionRating, now);
         } else {
             toStep = requireTargetStep(resolved);
             request.setCurrentStep(toStep);
             if (action == WorkflowAction.ASSIGN) {
-                newlyAssignedUser = assign(request, actingUser, assignedUserId, assignedTeamId);
+                newlyAssignedUser = assign(request, actingUser, assignedUserId, assignedTeamId, autoAssign);
             }
         }
         request = requestRepository.save(request);
@@ -218,16 +229,25 @@ public class WorkflowTransitionService {
                         "L'étape cible configurée pour cette transition n'existe plus."));
     }
 
-    /** ADR-03 - seule CLOSE clôture réellement la demande ; §6.4 - motif obligatoire, solution facultative. */
-    private void closeRequest(Request request, String closureReason, String closureSolution, Instant now) {
+    /**
+     * ADR-03 - seule CLOSE clôture réellement la demande ; §6.4 - motif obligatoire,
+     * solution et niveau de satisfaction facultatifs.
+     */
+    private void closeRequest(Request request, String closureReason, String closureSolution,
+                               Integer satisfactionRating, Instant now) {
         if (closureReason == null || closureReason.isBlank()) {
             throw new InvalidRequestStateException("CLOSURE_REASON_REQUIRED",
                     "Un motif de clôture est obligatoire (§6.4).");
+        }
+        if (satisfactionRating != null && (satisfactionRating < 1 || satisfactionRating > 5)) {
+            throw new InvalidRequestStateException("INVALID_SATISFACTION_RATING",
+                    "Le niveau de satisfaction doit être compris entre 1 et 5 (§6.4).");
         }
         request.setStatus(RequestStatus.CLOSED);
         request.setClosedAt(now);
         request.setClosureReason(closureReason);
         request.setClosureSolution(closureSolution);
+        request.setSatisfactionRating(satisfactionRating);
         request.setCurrentStep(null);
         // RG-08/ADR-14 - fenêtre de réouverture, posée à chaque clôture qu'elle finisse par
         // servir ou non (RequestService.reopen vérifie reopenAllowed séparément).
@@ -253,10 +273,18 @@ public class WorkflowTransitionService {
      * ne devrait pas plus se retrouver assigné à sa propre validation qu'y être autorisé
      * directement).
      */
-    private User assign(Request request, User actingUser, Long assignedUserId, Long assignedTeamId) {
+    private User assign(Request request, User actingUser, Long assignedUserId, Long assignedTeamId, boolean autoAssign) {
         if (assignedUserId != null && assignedTeamId != null) {
             throw new InvalidRequestStateException("AMBIGUOUS_ASSIGNMENT",
                     "Choisir un agent précis ou une équipe, pas les deux.");
+        }
+        if (autoAssign) {
+            if (assignedUserId != null || assignedTeamId == null) {
+                throw new InvalidRequestStateException("AUTO_ASSIGN_REQUIRES_TEAM",
+                        "L'affectation automatique attend une équipe, jamais un agent précis.");
+            }
+            assignedUserId = pickAutoAssignedUserId(request, assignedTeamId);
+            assignedTeamId = null;
         }
 
         User assignedUser = actingUser;
@@ -294,6 +322,40 @@ public class WorkflowTransitionService {
                 });
         taskAssignmentRepository.save(new TaskAssignment(request, assignedUser, assignedTeam, actingUser));
         return assignedUser;
+    }
+
+    /**
+     * §6.6 - "Affectation automatique selon le service, la catégorie ou une règle de
+     * répartition simple." Le service/la catégorie sont déjà pris en compte en amont : le
+     * seul assignedTeamId accepté ici gouverne la file d'équipe éligible pour CETTE demande
+     * (même vérification que le rattachement manuel à une équipe, ci-dessus). Parmi les
+     * membres de cette équipe (UserRoleAssignment scope=TEAM) réellement habilités sur cette
+     * demande (même canAct que le rattachement manuel à un agent précis), AutoAssignmentRule
+     * choisit le moins chargé - "une règle de répartition simple", jamais recodée ici.
+     */
+    private Long pickAutoAssignedUserId(Request request, Long assignedTeamId) {
+        Team team = teamRepository.findById(assignedTeamId)
+                .orElseThrow(() -> new EntityNotFoundException("Équipe introuvable."));
+        Long serviceDepartmentId = request.getRequestType().getServiceCatalog().getDepartment().getId();
+        if (!team.getDepartment().getId().equals(serviceDepartmentId)) {
+            throw new InvalidRequestStateException("TEAM_NOT_ELIGIBLE",
+                    "Cette équipe n'appartient pas au service de cette demande.");
+        }
+
+        List<AutoAssignmentRule.Candidate> candidates = userRoleAssignmentRepository
+                .findByScopeTypeAndScopeId(ScopeType.TEAM, assignedTeamId).stream()
+                .map(assignment -> assignment.getUser())
+                .distinct()
+                .filter(candidate -> Arrays.stream(WorkflowAction.values())
+                        .anyMatch(action -> authorizationService.canAct(candidate, request, action)))
+                .map(candidate -> new AutoAssignmentRule.Candidate(candidate.getId(),
+                        taskAssignmentRepository.countByAssignedUserIdAndActiveTrue(candidate.getId())))
+                .toList();
+        if (candidates.isEmpty()) {
+            throw new InvalidRequestStateException("NO_ELIGIBLE_CANDIDATE",
+                    "Aucun membre de cette équipe n'est habilité pour cette demande.");
+        }
+        return autoAssignmentRule.pickLeastLoaded(candidates);
     }
 
     private ResolutionContext buildContext(Request request) {

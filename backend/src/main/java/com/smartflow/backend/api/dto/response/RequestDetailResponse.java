@@ -15,6 +15,8 @@ import java.util.Map;
  * modèle matérialisé de Request (RG-07 - jamais recalculés ici, CLAUDE.md "ce qu'il ne faut
  * jamais faire - calculer un statut SLA à la volée"). reopenDeadline (RG-08/ADR-14) n'a de
  * sens que pour une demande CLOSED dont le type autorise la réouverture ; `null` sinon.
+ * closureReason/closureSolution/satisfactionRating (§6.4) ne sont renseignés qu'après CLOSE ;
+ * `null` avant.
  */
 public record RequestDetailResponse(
         Long id,
@@ -35,5 +37,8 @@ public record RequestDetailResponse(
         String slaStatus,
         Instant slaDueAtFirstResponse,
         Instant slaDueAtResolution,
-        Instant reopenDeadline) {
+        Instant reopenDeadline,
+        String closureReason,
+        String closureSolution,
+        Integer satisfactionRating) {
 }

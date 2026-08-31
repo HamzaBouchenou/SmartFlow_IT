@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  §15.2 étape 3 - filtre du rapport SpotBugs. EI_EXPOSE_REP/EI_EXPOSE_REP2 ("may expose
+  internal representation") représentaient 202 des 205 signalements bruts sur ce dépôt :
+  Spring construit chaque service/contrôleur par injection de constructeur (une référence
+  stockée à un bean géré par le conteneur) et chaque mapper JPA expose ses entités par un
+  simple getter - exactement le motif que ces deux règles signalent, sans rapport avec une
+  vraie fuite de représentation mutable (tableau, collection modifiable). Les exclure laisse
+  un rapport dont chaque ligne restante est un signalement à examiner, pas 202 faux positifs
+  noyant les 3 qui comptent.
+-->
+<FindBugsFilter>
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP" />
+    </Match>
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP2" />
+    </Match>
+</FindBugsFilter>
