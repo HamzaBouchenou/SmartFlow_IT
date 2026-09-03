@@ -37,7 +37,7 @@ public class StepTransitionAdminController {
     public StepAdminResponse addStep(@AuthenticationPrincipal SmartFlowUserDetails principal,
                                       @PathVariable Long workflowDefinitionId, @Valid @RequestBody UpsertStepRequest body) {
         var step = workflowAdminService.addStep(principal.getUser(), workflowDefinitionId, body.code(), body.name(),
-                body.displayOrder(), body.responsibleRole(), body.responsibleTeamId(), body.suspendSla());
+                body.displayOrder(), body.responsibleRole(), body.responsibleTeamId(), body.isSuspendSla());
         return WorkflowDefinitionAdminMapper.toStepResponse(step);
     }
 
@@ -45,7 +45,7 @@ public class StepTransitionAdminController {
     public StepAdminResponse updateStep(@AuthenticationPrincipal SmartFlowUserDetails principal, @PathVariable Long id,
                                          @Valid @RequestBody UpsertStepRequest body) {
         var step = workflowAdminService.updateStep(principal.getUser(), id, body.code(), body.name(), body.displayOrder(),
-                body.responsibleRole(), body.responsibleTeamId(), body.suspendSla());
+                body.responsibleRole(), body.responsibleTeamId(), body.isSuspendSla());
         return WorkflowDefinitionAdminMapper.toStepResponse(step);
     }
 

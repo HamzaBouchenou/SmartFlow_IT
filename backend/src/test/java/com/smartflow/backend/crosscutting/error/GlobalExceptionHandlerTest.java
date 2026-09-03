@@ -19,6 +19,7 @@ import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.validation.BeanPropertyBindingResult;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
@@ -175,6 +176,19 @@ class GlobalExceptionHandlerTest {
         assertThat(response.getBody()).isNotNull();
         assertThat(response.getBody().code()).isEqualTo("VALIDATION_ERROR");
         assertThat(response.getBody().message()).contains("id");
+    }
+
+    @Test
+    @DisplayName("maps a missing required @RequestParam (e.g. GET /dashboards/service without serviceId) to 400, not a 500")
+    void handlesMissingParameter() {
+        MissingServletRequestParameterException ex = new MissingServletRequestParameterException("serviceId", "Long");
+
+        ResponseEntity<ErrorResponse> response = handler.handleMissingParameter(ex);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(response.getBody()).isNotNull();
+        assertThat(response.getBody().code()).isEqualTo("VALIDATION_ERROR");
+        assertThat(response.getBody().message()).contains("serviceId");
     }
 
     @Test

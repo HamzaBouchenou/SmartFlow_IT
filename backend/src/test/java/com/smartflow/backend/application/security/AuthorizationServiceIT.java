@@ -2,6 +2,7 @@ package com.smartflow.backend.application.security;
 
 import com.smartflow.backend.domain.entity.Department;
 import com.smartflow.backend.domain.entity.Request;
+import com.smartflow.backend.domain.entity.RequestHistory;
 import com.smartflow.backend.domain.entity.RequestType;
 import com.smartflow.backend.domain.entity.ServiceCatalog;
 import com.smartflow.backend.domain.entity.Step;
@@ -17,6 +18,7 @@ import com.smartflow.backend.domain.enums.Role;
 import com.smartflow.backend.domain.enums.ScopeType;
 import com.smartflow.backend.domain.enums.WorkflowAction;
 import com.smartflow.backend.infrastructure.repository.DepartmentRepository;
+import com.smartflow.backend.infrastructure.repository.RequestHistoryRepository;
 import com.smartflow.backend.infrastructure.repository.RequestRepository;
 import com.smartflow.backend.infrastructure.repository.RequestTypeRepository;
 import com.smartflow.backend.infrastructure.repository.ServiceCatalogRepository;
@@ -88,6 +90,8 @@ class AuthorizationServiceIT {
     private TaskAssignmentRepository taskAssignmentRepository;
     @Autowired
     private RequestRepository requestRepository;
+    @Autowired
+    private RequestHistoryRepository requestHistoryRepository;
     @Autowired
     private SystemParameterRepository systemParameterRepository;
 
@@ -296,6 +300,43 @@ class AuthorizationServiceIT {
         userRoleAssignmentRepository.save(new UserRoleAssignment(manager, Role.MANAGER, ScopeType.DEPARTMENT, service.getId()));
 
         assertThat(authorizationService.canAnnotate(manager, draft)).isFalse();
+    }
+
+    @Test
+    @DisplayName("ADR-19 - canView still covers a CLOSED request via TEAM scope for the agent individually assigned to it, "
+            + "not just a team-queue drop")
+    void canViewCoversClosedRequestForIndividuallyAssignedAgent() {
+        // Found in recette against a real docker stack: an agent who personally resolved
+        // and closed a request (individual TaskAssignment, assignedTeam left null - see
+        // WorkflowTransitionService.assign) could no longer even GET that same request
+        // afterwards. ADR-03 nulls currentStep on CLOSE, and ScopeRule.TEAM only ever
+        // compares against currentStepTeamId/assignedTeamId (both null here) - ADR-14
+        // already solved exactly this for canReopen by resolving scope against the CLOSE's
+        // own fromStep instead ; this proves the same fix now covers canView generally.
+        Department direction = departmentRepository.save(new Department("Direction IT", null));
+        Department service = departmentRepository.save(new Department("Support", direction));
+        Team team = teamRepository.save(new Team("Equipe Support", service));
+        RequestType requestType = aRequestType(service);
+        Step step = aStepWithTransition(aWorkflowDefinition(requestType), WorkflowAction.CLOSE, team);
+        User requester = userRepository.save(new User("Nadia", "Requester", "nadia.adr19@example.com", "hash"));
+        Request request = aRequest(requestType, requester, "DEM-2026-ADR19A");
+        request.setCurrentStep(step);
+        request.setStatus(RequestStatus.SUBMITTED);
+        request = requestRepository.save(request);
+
+        User agent = userRepository.save(new User("Walid", "Agent", "walid.adr19@example.com", "hash"));
+        taskAssignmentRepository.save(new TaskAssignment(request, agent, null, agent));
+        userRoleAssignmentRepository.save(new UserRoleAssignment(agent, Role.AGENT, ScopeType.TEAM, team.getId()));
+
+        // CLOSE, as WorkflowTransitionService.execute really performs it: currentStep goes
+        // null (ADR-03) and RequestHistory keeps the step it left as fromStep.
+        request.setCurrentStep(null);
+        request.setStatus(RequestStatus.CLOSED);
+        request = requestRepository.save(request);
+        requestHistoryRepository.save(new RequestHistory(request, step, WorkflowAction.CLOSE, null, agent));
+
+        assertThat(authorizationService.canView(agent, request)).isTrue();
+        assertThat(authorizationService.canAnnotate(agent, request)).isTrue();
     }
 
     private RequestType aRequestType(Department service) {

@@ -109,7 +109,6 @@ export function AdminSlaPage() {
 
   return (
     <section>
-      <h1>SLA par type de demande</h1>
 
       <div className="task-filters">
         <select

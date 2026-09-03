@@ -37,7 +37,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -266,12 +265,13 @@ public class WorkflowTransitionService {
      * charge" (auto-affectation, RolePermissionRule's own comment maps ASSIGN to exactly
      * this) ; assignedUserId = "affectation manuelle à un agent habilité" ; assignedTeamId =
      * dépose la demande dans la file d'équipe (assignedUser reste null jusqu'à ce que
-     * quelqu'un de l'équipe la prenne à son tour). "Habilité" est vérifié en rejouant
-     * canAct pour la cible sur CETTE demande, déjà déplacée sur sa nouvelle étape : la même
-     * décision que celle qui vient d'autoriser actingUser, appliquée cette fois à la
-     * personne qu'on choisit de charger, séparation des tâches comprise (RG - un demandeur
-     * ne devrait pas plus se retrouver assigné à sa propre validation qu'y être autorisé
-     * directement).
+     * quelqu'un de l'équipe la prenne à son tour). "Habilité" est vérifié via
+     * AuthorizationService.canQualify pour la cible sur CETTE demande, déjà déplacée sur sa
+     * nouvelle étape (ADR-18, docs/DECISIONS.md - éligibilité sur l'étape de destination,
+     * délibérément) : la même décision que celle qui vient d'autoriser actingUser, appliquée
+     * cette fois à la personne qu'on choisit de charger, séparation des tâches comprise (RG -
+     * un demandeur ne devrait pas plus se retrouver assigné à sa propre validation qu'y être
+     * autorisé directement).
      */
     private User assign(Request request, User actingUser, Long assignedUserId, Long assignedTeamId, boolean autoAssign) {
         if (assignedUserId != null && assignedTeamId != null) {
@@ -292,9 +292,7 @@ public class WorkflowTransitionService {
         if (assignedUserId != null) {
             User target = userRepository.findById(assignedUserId)
                     .orElseThrow(() -> new EntityNotFoundException("Utilisateur introuvable."));
-            boolean eligible = Arrays.stream(WorkflowAction.values())
-                    .anyMatch(action -> authorizationService.canAct(target, request, action));
-            if (!eligible) {
+            if (!authorizationService.canQualify(target, request)) {
                 throw new InvalidRequestStateException("USER_NOT_ELIGIBLE",
                         "Cet utilisateur n'est pas habilité pour cette demande.");
             }
@@ -330,8 +328,9 @@ public class WorkflowTransitionService {
      * seul assignedTeamId accepté ici gouverne la file d'équipe éligible pour CETTE demande
      * (même vérification que le rattachement manuel à une équipe, ci-dessus). Parmi les
      * membres de cette équipe (UserRoleAssignment scope=TEAM) réellement habilités sur cette
-     * demande (même canAct que le rattachement manuel à un agent précis), AutoAssignmentRule
-     * choisit le moins chargé - "une règle de répartition simple", jamais recodée ici.
+     * demande (même AuthorizationService.canQualify que le rattachement manuel à un agent
+     * précis, ADR-18), AutoAssignmentRule choisit le moins chargé - "une règle de
+     * répartition simple", jamais recodée ici.
      */
     private Long pickAutoAssignedUserId(Request request, Long assignedTeamId) {
         Team team = teamRepository.findById(assignedTeamId)
@@ -346,8 +345,7 @@ public class WorkflowTransitionService {
                 .findByScopeTypeAndScopeId(ScopeType.TEAM, assignedTeamId).stream()
                 .map(assignment -> assignment.getUser())
                 .distinct()
-                .filter(candidate -> Arrays.stream(WorkflowAction.values())
-                        .anyMatch(action -> authorizationService.canAct(candidate, request, action)))
+                .filter(candidate -> authorizationService.canQualify(candidate, request))
                 .map(candidate -> new AutoAssignmentRule.Candidate(candidate.getId(),
                         taskAssignmentRepository.countByAssignedUserIdAndActiveTrue(candidate.getId())))
                 .toList();

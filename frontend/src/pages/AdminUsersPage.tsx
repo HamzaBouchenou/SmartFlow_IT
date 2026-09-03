@@ -70,48 +70,49 @@ export function AdminUsersPage() {
 
   return (
     <section>
-      <h1>Utilisateurs</h1>
       <ErrorBanner error={error} />
       {loading && <p className="page-loading">Chargement…</p>}
 
       {!loading && !error && (
         <>
-          <table className="task-table">
-            <thead>
-              <tr>
-                <th>Nom</th>
-                <th>E-mail</th>
-                <th>Département</th>
-                <th>Statut</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {users.map((u) => (
-                <tr key={u.id}>
-                  <td>
-                    {u.firstName} {u.lastName}
-                  </td>
-                  <td>{u.email}</td>
-                  <td>{u.departmentName ?? '—'}</td>
-                  <td>
-                    {u.active ? 'Actif' : 'Désactivé'}
-                    {u.locked && ' · Verrouillé'}
-                  </td>
-                  <td>
-                    <button type="button" onClick={() => setSelectedUserId(u.id)}>
-                      Gérer
-                    </button>
-                  </td>
-                </tr>
-              ))}
-              {users.length === 0 && (
+          <div className="table-scroll">
+            <table className="task-table">
+              <thead>
                 <tr>
-                  <td colSpan={5}>Aucun utilisateur pour l'instant.</td>
+                  <th>Nom</th>
+                  <th>E-mail</th>
+                  <th>Département</th>
+                  <th>Statut</th>
+                  <th></th>
                 </tr>
-              )}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {users.map((u) => (
+                  <tr key={u.id}>
+                    <td>
+                      {u.firstName} {u.lastName}
+                    </td>
+                    <td>{u.email}</td>
+                    <td>{u.departmentName ?? '—'}</td>
+                    <td>
+                      {u.active ? 'Actif' : 'Désactivé'}
+                      {u.locked && ' · Verrouillé'}
+                    </td>
+                    <td>
+                      <button type="button" onClick={() => setSelectedUserId(u.id)}>
+                        Gérer
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {users.length === 0 && (
+                  <tr>
+                    <td colSpan={5}>Aucun utilisateur pour l'instant.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
 
           <h2>Créer un compte</h2>
           <CreateUserForm departments={departments} onCreated={upsertUser} />

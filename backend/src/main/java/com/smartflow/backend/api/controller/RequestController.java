@@ -2,6 +2,7 @@ package com.smartflow.backend.api.controller;
 
 import com.smartflow.backend.api.dto.request.CreateRequestRequest;
 import com.smartflow.backend.api.dto.request.ExecuteTransitionRequest;
+import com.smartflow.backend.api.dto.request.QualifyRequestRequest;
 import com.smartflow.backend.api.dto.request.UpdateRequestRequest;
 import com.smartflow.backend.api.dto.response.PageResponse;
 import com.smartflow.backend.api.dto.response.RequestDetailResponse;
@@ -106,6 +107,18 @@ public class RequestController {
     @PostMapping("/{id}/reopen")
     public RequestDetailResponse reopen(@AuthenticationPrincipal SmartFlowUserDetails principal, @PathVariable Long id) {
         Request request = requestService.reopen(principal.getUser(), id);
+        return RequestMapper.toResponse(requestService.toDetailView(principal.getUser(), request));
+    }
+
+    /**
+     * §5/RG-07 - "qualifier" : pose la Priority. Jamais résolue via /transitions, comme
+     * REOPEN ci-dessus : ce n'est pas un WorkflowAction (RequestService.qualify's own
+     * javadoc), donc canQualify - pas availableActions[] - gouverne le bouton côté front.
+     */
+    @PostMapping("/{id}/qualify")
+    public RequestDetailResponse qualify(@AuthenticationPrincipal SmartFlowUserDetails principal, @PathVariable Long id,
+                                          @Valid @RequestBody QualifyRequestRequest body) {
+        Request request = requestService.qualify(principal.getUser(), id, body.priority());
         return RequestMapper.toResponse(requestService.toDetailView(principal.getUser(), request));
     }
 

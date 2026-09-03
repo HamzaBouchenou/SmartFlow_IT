@@ -46,7 +46,7 @@ public class RequestTypeAdminController {
                                             @Valid @RequestBody UpsertRequestTypeRequest body) {
         var created = catalogAdminService.createRequestType(principal.getUser(), body.serviceCatalogId(), body.name(),
                 body.description(), body.targetDelayDescription(), body.requiredDocuments(), body.contactInfo(),
-                body.reopenAllowed(), body.displayOrder());
+                body.isReopenAllowed(), body.displayOrder());
         return RequestTypeAdminMapper.toResponse(created);
     }
 
@@ -54,7 +54,7 @@ public class RequestTypeAdminController {
     public RequestTypeAdminResponse update(@AuthenticationPrincipal SmartFlowUserDetails principal, @PathVariable Long id,
                                             @Valid @RequestBody UpsertRequestTypeRequest body) {
         var updated = catalogAdminService.updateRequestType(principal.getUser(), id, body.name(), body.description(),
-                body.targetDelayDescription(), body.requiredDocuments(), body.contactInfo(), body.reopenAllowed(),
+                body.targetDelayDescription(), body.requiredDocuments(), body.contactInfo(), body.isReopenAllowed(),
                 body.displayOrder());
         return RequestTypeAdminMapper.toResponse(updated);
     }

@@ -11,6 +11,7 @@ import com.smartflow.backend.domain.rule.SlaSuspensionRule;
 import com.smartflow.backend.domain.rule.SuspensionPeriod;
 import com.smartflow.backend.infrastructure.repository.RequestRepository;
 import com.smartflow.backend.infrastructure.repository.SlaRepository;
+import com.smartflow.backend.infrastructure.repository.SystemParameterRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -40,22 +41,41 @@ public class SlaSweepScheduler {
 
     private static final Logger log = LoggerFactory.getLogger(SlaSweepScheduler.class);
 
+    /**
+     * §6.10 - "seuils d'alerte" parmi les paramètres généraux administrables : pourcentage
+     * du délai consommé à partir duquel une demande passe AT_RISK (et déclenche donc
+     * SLA_WARNING via SlaEscalationService). 80 % était la valeur codée en dur dans
+     * SlaCalculator jusqu'à ce lot.
+     */
+    public static final String WARNING_THRESHOLD_PERCENT_KEY = "sla.warning-threshold-percent";
+    private static final int DEFAULT_WARNING_THRESHOLD_PERCENT = 80;
+
     private final RequestRepository requestRepository;
     private final SlaRepository slaRepository;
     private final SlaCalculator slaCalculator;
     private final SlaSuspensionRule slaSuspensionRule;
     private final SlaEscalationService slaEscalationService;
+    private final SystemParameterRepository systemParameterRepository;
     private final Clock clock;
 
     public SlaSweepScheduler(RequestRepository requestRepository, SlaRepository slaRepository,
                               SlaCalculator slaCalculator, SlaSuspensionRule slaSuspensionRule,
-                              SlaEscalationService slaEscalationService, Clock clock) {
+                              SlaEscalationService slaEscalationService,
+                              SystemParameterRepository systemParameterRepository, Clock clock) {
         this.requestRepository = requestRepository;
         this.slaRepository = slaRepository;
         this.slaCalculator = slaCalculator;
         this.slaSuspensionRule = slaSuspensionRule;
         this.slaEscalationService = slaEscalationService;
+        this.systemParameterRepository = systemParameterRepository;
         this.clock = clock;
+    }
+
+    /** §6.10 - lu à chaque balayage : un changement d'administration s'applique dès le suivant. */
+    private int configuredWarningThresholdPercent() {
+        return systemParameterRepository.findByKey(WARNING_THRESHOLD_PERCENT_KEY)
+                .map(parameter -> Integer.parseInt(parameter.getValue()))
+                .orElse(DEFAULT_WARNING_THRESHOLD_PERCENT);
     }
 
     @Scheduled(fixedDelayString = "${smartflow.sla.sweep-interval-ms:60000}")
@@ -97,7 +117,8 @@ public class SlaSweepScheduler {
         // The resolution deadline is the overall SLA commitment; this does not yet
         // distinguish a "before first response" phase from a "before resolution" phase -
         // Request has no firstRespondedAt field to tell them apart.
-        SlaStatus newStatus = slaCalculator.computeStatus(now, submittedAt, sla.getResolutionMinutes(), allPeriods);
+        SlaStatus newStatus = slaCalculator.computeStatus(now, submittedAt, sla.getResolutionMinutes(), allPeriods,
+                configuredWarningThresholdPercent());
         request.setSlaStatus(newStatus);
         request.setSlaSuspendedSince(suspensions.openSince());
         request.setSlaSuspendedMinutes((int) suspensions.closedMinutes());

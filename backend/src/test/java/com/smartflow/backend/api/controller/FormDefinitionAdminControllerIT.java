@@ -224,6 +224,50 @@ class FormDefinitionAdminControllerIT {
                 .andExpect(jsonPath("$.fields.length()").value(0));
     }
 
+    @Test
+    @DisplayName("UpsertFormFieldRequest.required is nullable - a field can be created without sending the key at all")
+    void addFieldWithoutRequiredKeyDefaultsToNotRequired() throws Exception {
+        // Same class of bug as UpsertStepRequest (CLAUDE.md): required used to be a
+        // primitive boolean, and Jackson refused a record whose JSON body omitted it
+        // (MALFORMED_REQUEST) instead of defaulting it to false.
+        long draftId = createDraft();
+        String body = objectMapper.writeValueAsString(Map.of(
+                "code", "commentaire", "label", "Commentaire", "fieldType", "TEXT", "displayOrder", 1));
+
+        mockMvc.perform(post("/api/v1/admin/form-definitions/{id}/fields", draftId).with(user(asAdmin)).with(csrf())
+                        .contentType("application/json").content(body))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.required").value(false));
+    }
+
+    @Test
+    @DisplayName("UpsertFormFieldRequest.displayOrder stays mandatory - a clean VALIDATION_ERROR, not MALFORMED_REQUEST, when it is missing")
+    void addFieldWithoutDisplayOrderIsRejectedCleanly() throws Exception {
+        long draftId = createDraft();
+        String body = objectMapper.writeValueAsString(Map.of(
+                "code", "commentaire", "label", "Commentaire", "fieldType", "TEXT", "required", false));
+
+        mockMvc.perform(post("/api/v1/admin/form-definitions/{id}/fields", draftId).with(user(asAdmin)).with(csrf())
+                        .contentType("application/json").content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
+                .andExpect(jsonPath("$.fieldErrors[0].field").value("displayOrder"));
+    }
+
+    @Test
+    @DisplayName("UpsertFieldOptionRequest.displayOrder stays mandatory - a clean VALIDATION_ERROR, not MALFORMED_REQUEST, when it is missing")
+    void addOptionWithoutDisplayOrderIsRejectedCleanly() throws Exception {
+        long draftId = createDraft();
+        long fieldId = addField(draftId, "urgency", "Urgence", "LIST");
+        String body = objectMapper.writeValueAsString(Map.of("value", "HIGH", "label", "Élevée"));
+
+        mockMvc.perform(post("/api/v1/admin/form-fields/{id}/options", fieldId).with(user(asAdmin)).with(csrf())
+                        .contentType("application/json").content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
+                .andExpect(jsonPath("$.fieldErrors[0].field").value("displayOrder"));
+    }
+
     private long createDraft() throws Exception {
         MvcResult result = mockMvc.perform(post("/api/v1/admin/request-types/{id}/form-definitions", requestType.getId())
                         .with(user(asAdmin)).with(csrf()))

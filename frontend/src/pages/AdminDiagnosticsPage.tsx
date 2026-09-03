@@ -58,7 +58,6 @@ export function AdminDiagnosticsPage() {
 
   return (
     <section>
-      <h1>Diagnostic</h1>
       <ErrorBanner error={error} />
       {loading && <p className="page-loading">Chargement…</p>}
 

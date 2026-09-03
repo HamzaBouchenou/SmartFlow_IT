@@ -1,6 +1,7 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { AuthProvider } from './auth/AuthContext';
 import { AppLayout } from './layout/AppLayout';
+import { AdminLayout } from './layout/AdminLayout';
 import { ProtectedRoute } from './routes/ProtectedRoute';
 import { LoginPage } from './pages/LoginPage';
 import { HomePage } from './pages/HomePage';
@@ -51,17 +52,22 @@ export default function App() {
             <Route path="/mes-taches" element={<TasksPage />} />
             <Route path="/tableau-de-bord" element={<DashboardPage />} />
             <Route path="/notifications" element={<NotificationsPage />} />
-            <Route path="/administration" element={<AdminHomePage />} />
-            <Route path="/administration/journal-audit" element={<AdminAuditLogPage />} />
-            <Route path="/administration/parametres" element={<AdminSystemParametersPage />} />
-            <Route path="/administration/organisation" element={<AdminOrganizationPage />} />
-            <Route path="/administration/modeles-email" element={<AdminEmailTemplatesPage />} />
-            <Route path="/administration/sla" element={<AdminSlaPage />} />
-            <Route path="/administration/diagnostic" element={<AdminDiagnosticsPage />} />
-            <Route path="/administration/utilisateurs" element={<AdminUsersPage />} />
-            <Route path="/administration/catalogue" element={<AdminCataloguePage />} />
-            <Route path="/administration/formulaires" element={<AdminFormsPage />} />
-            <Route path="/administration/workflows" element={<AdminWorkflowsPage />} />
+            {/* Route de mise en page sans chemin (§6.10, maquette 08) : elle n'ajoute
+                aucune URL et n'en change aucune, elle donne seulement à ces onze écrans
+                le rail de sous-navigation commun d'`AdminLayout`. */}
+            <Route element={<AdminLayout />}>
+              <Route path="/administration" element={<AdminHomePage />} />
+              <Route path="/administration/journal-audit" element={<AdminAuditLogPage />} />
+              <Route path="/administration/parametres" element={<AdminSystemParametersPage />} />
+              <Route path="/administration/organisation" element={<AdminOrganizationPage />} />
+              <Route path="/administration/modeles-email" element={<AdminEmailTemplatesPage />} />
+              <Route path="/administration/sla" element={<AdminSlaPage />} />
+              <Route path="/administration/diagnostic" element={<AdminDiagnosticsPage />} />
+              <Route path="/administration/utilisateurs" element={<AdminUsersPage />} />
+              <Route path="/administration/catalogue" element={<AdminCataloguePage />} />
+              <Route path="/administration/formulaires" element={<AdminFormsPage />} />
+              <Route path="/administration/workflows" element={<AdminWorkflowsPage />} />
+            </Route>
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

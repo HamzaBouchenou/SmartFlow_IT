@@ -3,6 +3,7 @@ import type {
   CreateRequestRequest,
   ExecuteTransitionRequest,
   PageResponse,
+  QualifyRequestRequest,
   RequestDetailResponse,
   RequestHistoryResponse,
   RequestStatus,
@@ -54,4 +55,9 @@ export function executeTransition(id: number, request: ExecuteTransitionRequest)
 /** RG-08/ADR-14 - jamais résolue via executeTransition : voir WorkflowAction.REOPEN's own javadoc côté back-end. */
 export function reopenRequest(id: number) {
   return apiFetch<RequestDetailResponse>(`/requests/${id}/reopen`, { method: 'POST' });
+}
+
+/** §5/RG-07 - jamais résolue via executeTransition non plus : voir RequestService.qualify's own javadoc côté back-end. */
+export function qualifyRequest(id: number, request: QualifyRequestRequest) {
+  return apiFetch<RequestDetailResponse>(`/requests/${id}/qualify`, { method: 'POST', body: request });
 }

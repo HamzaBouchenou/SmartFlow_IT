@@ -17,6 +17,16 @@ import { actionLabel, formatDate } from '../lib/format';
 const ROLES: UserRole[] = ['REQUESTER', 'MANAGER', 'AGENT', 'SERVICE_MANAGER', 'FUNCTIONAL_ADMIN', 'TECHNICAL_ADMIN', 'AUDITOR'];
 const ACTIONS: WorkflowAction[] = ['VALIDATE', 'REJECT', 'RETURN', 'ASSIGN', 'REQUEST_INFO', 'CLOSE'];
 
+const PUBLICATION_LABELS: Record<string, string> = {
+  DRAFT: 'Brouillon',
+  PUBLISHED: 'Publiée',
+  ARCHIVED: 'Archivée',
+};
+
+function publicationLabel(status: string): string {
+  return PUBLICATION_LABELS[status] ?? status;
+}
+
 /** §6.5/§10.1/§6.10 - administration versionnée des workflows (ADR-17, docs/DECISIONS.md ;
  * RG-03). Un DRAFT à la fois par type de demande ; publier archive l'ancien PUBLISHED
  * (RG-12) sans jamais toucher une demande déjà en cours sur lui (RG-03). Éditeur
@@ -184,26 +194,31 @@ export function AdminWorkflowsPage() {
 
   return (
     <section>
-      <h1>Workflows</h1>
 
-      <div className="task-filters">
-        <select value={serviceId ?? ''} onChange={(event) => setServiceId(event.target.value ? Number(event.target.value) : null)}>
-          {services.map((service) => (
-            <option key={service.id} value={service.id}>
-              {service.name}
-            </option>
-          ))}
-        </select>
-        <select
-          value={requestTypeId ?? ''}
-          onChange={(event) => setRequestTypeId(event.target.value ? Number(event.target.value) : null)}
-        >
-          {requestTypes.map((requestType) => (
-            <option key={requestType.id} value={requestType.id}>
-              {requestType.name}
-            </option>
-          ))}
-        </select>
+      <div className="filter-bar">
+        <label>
+          Service
+          <select value={serviceId ?? ''} onChange={(event) => setServiceId(event.target.value ? Number(event.target.value) : null)}>
+            {services.map((service) => (
+              <option key={service.id} value={service.id}>
+                {service.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Type de demande
+          <select
+            value={requestTypeId ?? ''}
+            onChange={(event) => setRequestTypeId(event.target.value ? Number(event.target.value) : null)}
+          >
+            {requestTypes.map((requestType) => (
+              <option key={requestType.id} value={requestType.id}>
+                {requestType.name}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
 
       <ErrorBanner error={error} />
@@ -211,46 +226,70 @@ export function AdminWorkflowsPage() {
 
       {!loading && !error && requestTypeId !== null && (
         <>
-          <table className="task-table">
-            <thead>
-              <tr>
-                <th>Version</th>
-                <th>Statut</th>
-                <th>Publiée le</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {versions.map((version) => (
-                <tr key={version.id}>
-                  <td>
-                    <button type="button" className="link-button" onClick={() => void selectVersion(version.id)}>
-                      v{version.version}
-                    </button>
-                  </td>
-                  <td>{version.status}</td>
-                  <td>{formatDate(version.publishedAt)}</td>
-                  <td>
-                    {version.status === 'DRAFT' && (
-                      <>
-                        <button type="button" onClick={() => void handlePublish(version.id)}>
-                          Publier
-                        </button>{' '}
-                        <button type="button" onClick={() => void handleDeleteDraft(version.id)}>
-                          Supprimer
-                        </button>
-                      </>
-                    )}
-                  </td>
-                </tr>
-              ))}
-              {versions.length === 0 && (
+          <div className="table-scroll">
+            <table className="task-table">
+              <thead>
                 <tr>
-                  <td colSpan={4}>Aucune version pour ce type de demande.</td>
+                  <th>Version</th>
+                  <th>Statut</th>
+                  <th>Publiée le</th>
+                  <th></th>
                 </tr>
-              )}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {versions.map((version) => (
+                  <tr key={version.id}>
+                    <td>
+                      <button type="button" className="link-button" onClick={() => void selectVersion(version.id)}>
+                        v{version.version}
+                      </button>
+                    </td>
+                    <td>
+                      <span className={`status-badge publication-${version.status.toLowerCase()}`}>
+                        {publicationLabel(version.status)}
+                      </span>
+                    </td>
+                    <td>{formatDate(version.publishedAt)}</td>
+                    <td className="col-actions">
+                      {version.status === 'DRAFT' && (
+                        <>
+                          <button
+                            type="button"
+                            className="button-primary"
+                            onClick={() => void handlePublish(version.id)}
+                          >
+                            Publier
+                          </button>{' '}
+                          <button
+                            type="button"
+                            className="button-secondary"
+                            onClick={() => void handleDeleteDraft(version.id)}
+                          >
+                            Supprimer
+                          </button>
+                        </>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+                {versions.length === 0 && (
+                  <tr>
+                    <td colSpan={4}>Aucune version pour ce type de demande.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Règle 6 du README des maquettes : RG-03 doit se voir à l'écran, pas seulement
+              tenir dans le code. `Request.workflowDefinitionId` est figé à la soumission et
+              `WorkflowTransitionService` résout toujours le graphe de *cette* version -
+              publier une nouvelle version ne réécrit jamais une demande en cours. */}
+          <p className="notice notice-warning">
+            <strong>Publier une nouvelle version n'affectera aucune demande en cours.</strong>
+            Chaque demande conserve la version de workflow figée à sa soumission (RG-03) ; publier archive la version
+            actuellement publiée, elle ne la supprime jamais (RG-12).
+          </p>
 
           {!versions.some((version) => version.status === 'DRAFT') && (
             <button type="button" onClick={() => void handleCreateDraft()}>
@@ -313,79 +352,83 @@ function WorkflowEditor({
       </h2>
       <ErrorBanner error={error} />
 
-      <table className="task-table">
-        <thead>
-          <tr>
-            <th>Code</th>
-            <th>Nom</th>
-            <th>Ordre</th>
-            <th>Rôle responsable</th>
-            <th>Équipe</th>
-            <th>Suspend SLA</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {steps.map((step) => (
-            <tr key={step.id}>
-              <td>{step.code}</td>
-              <td>{step.name}</td>
-              <td>{step.displayOrder}</td>
-              <td>{step.responsibleRole ?? '—'}</td>
-              <td>{step.responsibleTeamName ?? '—'}</td>
-              <td>{step.suspendSla ? 'Oui' : 'Non'}</td>
-              <td>
-                {editable && (
-                  <button type="button" onClick={() => void handleDeleteStep(step.id)}>
-                    Supprimer
-                  </button>
-                )}
-              </td>
-            </tr>
-          ))}
-          {steps.length === 0 && (
+      <div className="table-scroll">
+        <table className="task-table">
+          <thead>
             <tr>
-              <td colSpan={7}>Aucune étape pour l'instant.</td>
+              <th>Code</th>
+              <th>Nom</th>
+              <th>Ordre</th>
+              <th>Rôle responsable</th>
+              <th>Équipe</th>
+              <th>Suspend SLA</th>
+              <th></th>
             </tr>
-          )}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {steps.map((step) => (
+              <tr key={step.id}>
+                <td>{step.code}</td>
+                <td>{step.name}</td>
+                <td>{step.displayOrder}</td>
+                <td>{step.responsibleRole ?? '—'}</td>
+                <td>{step.responsibleTeamName ?? '—'}</td>
+                <td>{step.suspendSla ? 'Oui' : 'Non'}</td>
+                <td>
+                  {editable && (
+                    <button type="button" onClick={() => void handleDeleteStep(step.id)}>
+                      Supprimer
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+            {steps.length === 0 && (
+              <tr>
+                <td colSpan={7}>Aucune étape pour l'instant.</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
       {editable && <AddStepForm workflowDefinitionId={workflow.id} teams={teams} nextOrder={steps.length + 1} onAdded={refresh} />}
 
       <h2>Transitions</h2>
-      <table className="task-table">
-        <thead>
-          <tr>
-            <th>Depuis</th>
-            <th>Action</th>
-            <th>Vers</th>
-            <th>Condition priorité</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {transitions.map((transition) => (
-            <tr key={transition.id}>
-              <td>{steps.find((step) => step.id === transition.fromStepId)?.name ?? transition.fromStepId}</td>
-              <td>{actionLabel(transition.action)}</td>
-              <td>{steps.find((step) => step.id === transition.toStepId)?.name ?? '— (terminale)'}</td>
-              <td>{transition.conditionPriority ?? '—'}</td>
-              <td>
-                {editable && (
-                  <button type="button" onClick={() => void handleDeleteTransition(transition.id)}>
-                    Supprimer
-                  </button>
-                )}
-              </td>
-            </tr>
-          ))}
-          {transitions.length === 0 && (
+      <div className="table-scroll">
+        <table className="task-table">
+          <thead>
             <tr>
-              <td colSpan={5}>Aucune transition pour l'instant.</td>
+              <th>Depuis</th>
+              <th>Action</th>
+              <th>Vers</th>
+              <th>Condition priorité</th>
+              <th></th>
             </tr>
-          )}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {transitions.map((transition) => (
+              <tr key={transition.id}>
+                <td>{steps.find((step) => step.id === transition.fromStepId)?.name ?? transition.fromStepId}</td>
+                <td>{actionLabel(transition.action)}</td>
+                <td>{steps.find((step) => step.id === transition.toStepId)?.name ?? '— (terminale)'}</td>
+                <td>{transition.conditionPriority ?? '—'}</td>
+                <td>
+                  {editable && (
+                    <button type="button" onClick={() => void handleDeleteTransition(transition.id)}>
+                      Supprimer
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+            {transitions.length === 0 && (
+              <tr>
+                <td colSpan={5}>Aucune transition pour l'instant.</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
       {editable && <AddTransitionForm steps={steps} onAdded={refresh} />}
     </div>
   );

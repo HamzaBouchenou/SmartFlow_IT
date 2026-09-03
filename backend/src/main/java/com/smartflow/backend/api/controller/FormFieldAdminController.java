@@ -38,7 +38,7 @@ public class FormFieldAdminController {
     public FormFieldAdminResponse addField(@AuthenticationPrincipal SmartFlowUserDetails principal,
                                             @PathVariable Long formDefinitionId, @Valid @RequestBody UpsertFormFieldRequest body) {
         var field = formAdminService.addField(principal.getUser(), formDefinitionId, body.code(), body.label(), body.fieldType(),
-                body.required(), body.displayOrder(), body.helpText(), body.visibleWhenFieldCode(), body.visibleWhenValue());
+                body.isRequired(), body.displayOrder(), body.helpText(), body.visibleWhenFieldCode(), body.visibleWhenValue());
         return FormDefinitionAdminMapper.toFieldResponse(field, List.of());
     }
 
@@ -46,7 +46,7 @@ public class FormFieldAdminController {
     public FormFieldAdminResponse updateField(@AuthenticationPrincipal SmartFlowUserDetails principal, @PathVariable Long id,
                                                @Valid @RequestBody UpsertFormFieldRequest body) {
         var field = formAdminService.updateField(principal.getUser(), id, body.code(), body.label(), body.fieldType(),
-                body.required(), body.displayOrder(), body.helpText(), body.visibleWhenFieldCode(), body.visibleWhenValue());
+                body.isRequired(), body.displayOrder(), body.helpText(), body.visibleWhenFieldCode(), body.visibleWhenValue());
         return FormDefinitionAdminMapper.toFieldResponse(field, formAdminService.getOptions(field.getId()));
     }
 

@@ -1,6 +1,8 @@
 package com.smartflow.backend.api.controller;
 
 import com.smartflow.backend.domain.entity.User;
+import com.smartflow.backend.domain.enums.NotificationType;
+import com.smartflow.backend.infrastructure.repository.NotificationPreferenceRepository;
 import com.smartflow.backend.infrastructure.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -24,6 +26,7 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -54,6 +57,8 @@ class ProfileControllerIT {
     private UserRepository userRepository;
     @Autowired
     private PasswordEncoder passwordEncoder;
+    @Autowired
+    private NotificationPreferenceRepository notificationPreferenceRepository;
 
     private User self;
     private UserDetails asSelf;
@@ -102,5 +107,47 @@ class ProfileControllerIT {
         User reloaded = userRepository.findById(self.getId()).orElseThrow();
         assertThat(passwordEncoder.matches("NewPass123", reloaded.getPasswordHash())).isTrue();
         assertThat(passwordEncoder.matches("OldPass123", reloaded.getPasswordHash())).isFalse();
+    }
+
+    @Test
+    @DisplayName("§6.8 - la liste des préférences porte les 7 types, activés par défaut faute de ligne en base (ADR-12)")
+    void listsEveryNotificationTypeEnabledByDefault() throws Exception {
+        mockMvc.perform(get("/api/v1/profile/notification-preferences").with(user(asSelf)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(NotificationType.values().length))
+                .andExpect(jsonPath("$[?(@.notificationType=='ASSIGNMENT')].emailEnabled").value(true))
+                .andExpect(jsonPath("$[?(@.notificationType=='ASSIGNMENT')].mandatory").value(false))
+                .andExpect(jsonPath("$[?(@.notificationType=='SLA_WARNING')].mandatory").value(true));
+    }
+
+    @Test
+    @DisplayName("§6.8 - un type non obligatoire se désactive et la préférence est bien persistée")
+    void disablesOptionalNotificationType() throws Exception {
+        String body = objectMapper.writeValueAsString(Map.of("emailEnabled", false));
+        mockMvc.perform(put("/api/v1/profile/notification-preferences/{type}", "ASSIGNMENT")
+                        .with(user(asSelf)).with(csrf()).contentType("application/json").content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.emailEnabled").value(false));
+
+        assertThat(notificationPreferenceRepository
+                .findByUserIdAndNotificationType(self.getId(), NotificationType.ASSIGNMENT))
+                .hasValueSatisfying(preference -> assertThat(preference.isEmailEnabled()).isFalse());
+
+        mockMvc.perform(get("/api/v1/profile/notification-preferences").with(user(asSelf)))
+                .andExpect(jsonPath("$[?(@.notificationType=='ASSIGNMENT')].emailEnabled").value(false));
+    }
+
+    @Test
+    @DisplayName("§6.8/ADR-12 - une alerte obligatoire (SLA_WARNING) ne peut pas être désactivée, et le dit explicitement")
+    void refusesToDisableMandatoryNotificationType() throws Exception {
+        String body = objectMapper.writeValueAsString(Map.of("emailEnabled", false));
+        mockMvc.perform(put("/api/v1/profile/notification-preferences/{type}", "SLA_WARNING")
+                        .with(user(asSelf)).with(csrf()).contentType("application/json").content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("NOTIFICATION_TYPE_MANDATORY"));
+
+        // Rien n'a été écrit : le refus doit être total, pas une ligne posée puis ignorée.
+        assertThat(notificationPreferenceRepository
+                .findByUserIdAndNotificationType(self.getId(), NotificationType.SLA_WARNING)).isEmpty();
     }
 }

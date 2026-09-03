@@ -47,7 +47,6 @@ export function AdminSystemParametersPage() {
 
   return (
     <section>
-      <h1>Paramètres généraux</h1>
       <ErrorBanner error={error} />
       {loading && <p className="page-loading">Chargement…</p>}
 

@@ -45,7 +45,6 @@ export function AdminEmailTemplatesPage() {
 
   return (
     <section>
-      <h1>Modèles d'e-mail</h1>
       <ErrorBanner error={error} />
       {loading && <p className="page-loading">Chargement…</p>}
 

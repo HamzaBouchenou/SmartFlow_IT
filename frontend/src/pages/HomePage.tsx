@@ -1,17 +1,26 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import * as dashboardsApi from '../api/dashboards';
-import type { HomeDashboardResponse } from '../api/types';
+import type { AgentTaskItem, HomeDashboardResponse } from '../api/types';
 import { ErrorBanner } from '../components/ErrorBanner';
-import { useAuth } from '../auth/AuthContext';
-import { actionLabel, formatDate, statusLabel } from '../lib/format';
+import { EmptyState } from '../components/EmptyState';
+import { SlaBadge } from '../components/SlaBadge';
+import { StatCard } from '../components/StatCard';
+import { actionLabel, formatDate, formatDeadline, statusLabel } from '../lib/format';
 
 /** §9.4 - écran Accueil : "Raccourcis, demandes récentes, tâches à traiter et indicateurs
  * adaptés au rôle." §6.9's "vue demandeur"/"vue agent" sont les indicateurs adaptés au
  * rôle de cet écran (la "vue responsable" reste le tableau de bord de service séparé,
- * /tableau-de-bord) - voir HomeDashboardResponse côté back-end pour cette correspondance. */
+ * /tableau-de-bord) - voir HomeDashboardResponse côté back-end pour cette correspondance.
+ *
+ * Maquette 02. Deux blocs de la maquette n'ont volontairement pas été repris tels quels :
+ * l'histogramme "Respect des SLA - 30 derniers jours" et le fil "Activité récente" ne
+ * correspondent à aucune donnée renvoyée par `GET /dashboards/home` (le taux de respect
+ * est un indicateur *de service*, borné par canViewDashboard, et il vit sur
+ * /tableau-de-bord). Les remplir ici aurait demandé d'inventer des chiffres ; leur place
+ * est prise par "Dernières décisions", qui est précisément ce que §6.9 attend de la vue
+ * demandeur. */
 export function HomePage() {
-  const { user } = useAuth();
   const [home, setHome] = useState<HomeDashboardResponse | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [loading, setLoading] = useState(true);
@@ -42,114 +51,173 @@ export function HomePage() {
     };
   }, []);
 
+  // "À traiter en priorité" : les deux files que le serveur a déjà calculées, fusionnées
+  // sans doublon (un dossier en retard peut aussi être en priorité haute), les retards
+  // d'abord - ce sont eux qui appellent une action immédiate.
+  const priorityTasks: AgentTaskItem[] = home?.agent
+    ? [...home.agent.overdue, ...home.agent.highPriority.filter((task) => !home.agent!.overdue.some((late) => late.id === task.id))]
+    : [];
+
   return (
     <section className="home-page">
-      <h1>Bonjour {user?.firstName ?? ''}</h1>
-
-      <div className="home-shortcuts">
-        <Link to="/catalogue" className="home-shortcut">
-          Nouvelle demande
-        </Link>
-        <Link to="/mes-demandes" className="home-shortcut">
-          Mes demandes
-        </Link>
-        <Link to="/mes-taches" className="home-shortcut">
-          Mes tâches
-        </Link>
-        <Link to="/tableau-de-bord" className="home-shortcut">
-          Tableau de bord
-        </Link>
-      </div>
-
       <ErrorBanner error={error} />
       {loading && <p className="page-loading">Chargement…</p>}
 
       {home && (
-        <div className="home-sections">
-          <section className="home-section">
-            <h2>Mes demandes</h2>
-            <p>
-              <strong>{home.requester.inProgressCount}</strong> demande(s) en cours.
-            </p>
-            {home.requester.requests.length > 0 ? (
-              <table className="task-table">
-                <thead>
-                  <tr>
-                    <th>Référence</th>
-                    <th>Titre</th>
-                    <th>Statut</th>
-                    <th>SLA</th>
-                    <th>Échéance de résolution</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {home.requester.requests.map((item) => (
-                    <tr key={item.id}>
-                      <td>
-                        <Link to={`/demandes/${item.id}`}>{item.reference}</Link>
-                      </td>
-                      <td>{item.title}</td>
-                      <td>{statusLabel(item.status)}</td>
-                      <td>{item.slaStatus ?? '—'}</td>
-                      <td>{formatDate(item.slaDueAtResolution)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            ) : (
-              <p>Aucune demande en cours.</p>
+        <>
+          <div className="kpi-grid">
+            {home.agent && (
+              <>
+                <StatCard
+                  label="Mes tâches ouvertes"
+                  value={home.agent.currentLoad}
+                  caption="demandes qui vous sont affectées"
+                />
+                <StatCard
+                  label="En retard"
+                  value={home.agent.overdue.length}
+                  caption="action requise"
+                  tone="danger"
+                />
+                <StatCard
+                  label="Priorité haute"
+                  value={home.agent.highPriority.length}
+                  caption="à traiter en priorité"
+                  tone="warning"
+                />
+              </>
             )}
+            <StatCard
+              label="Mes demandes en cours"
+              value={home.requester.inProgressCount}
+              caption="demandes que vous avez soumises"
+              tone="success"
+            />
+          </div>
 
-            <h3>Dernières décisions</h3>
-            {home.requester.recentDecisions.length > 0 ? (
-              <ul className="home-decision-list">
-                {home.requester.recentDecisions.map((decision, index) => (
-                  <li key={`${decision.requestId}-${index}`}>
-                    <Link to={`/demandes/${decision.requestId}`}>{decision.reference}</Link> —{' '}
-                    {actionLabel(decision.action)} le {formatDate(decision.occurredAt)}
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p>Aucune décision récente.</p>
-            )}
-          </section>
-
-          {home.agent && (
-            <section className="home-section">
-              <h2>Mes tâches à traiter</h2>
-              <p>
-                Charge actuelle : <strong>{home.agent.currentLoad}</strong> demande(s).
-              </p>
-
-              <h3>En retard</h3>
-              {home.agent.overdue.length > 0 ? (
-                <ul className="home-decision-list">
-                  {home.agent.overdue.map((item) => (
-                    <li key={item.id}>
-                      <Link to={`/demandes/${item.id}`}>{item.reference}</Link> — {item.title}
-                    </li>
-                  ))}
-                </ul>
+          <div className="home-grid">
+            <div className="home-col">
+              {home.agent ? (
+                <section className="panel">
+                  <header className="panel-head">
+                    <h2>À traiter en priorité</h2>
+                    <Link to="/mes-taches">Tout voir</Link>
+                  </header>
+                  {priorityTasks.length > 0 ? (
+                    <ul className="row-list">
+                      {priorityTasks.map((task) => (
+                        <li key={task.id}>
+                          <Link to={`/demandes/${task.id}`} className="row-main">
+                            <span className="reference">{task.reference}</span>
+                            <span className="row-title">{task.title}</span>
+                          </Link>
+                          <SlaBadge status={task.slaStatus} />
+                          <span className="row-deadline">{formatDeadline(task.slaDueAtResolution)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <EmptyState message="Aucun dossier en retard ni prioritaire. Votre file est à jour." />
+                  )}
+                </section>
               ) : (
-                <p>Aucun dossier en retard.</p>
+                <section className="panel">
+                  <header className="panel-head">
+                    <h2>Mes demandes en cours</h2>
+                    <Link to="/mes-demandes">Tout voir</Link>
+                  </header>
+                  {home.requester.requests.length > 0 ? (
+                    <ul className="row-list">
+                      {home.requester.requests.map((item) => (
+                        <li key={item.id}>
+                          <Link to={`/demandes/${item.id}`} className="row-main">
+                            <span className="reference">{item.reference}</span>
+                            <span className="row-title">{item.title}</span>
+                          </Link>
+                          <SlaBadge status={item.slaStatus} />
+                          <span className="row-deadline">{formatDeadline(item.slaDueAtResolution)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <EmptyState message="Aucune demande en cours. Parcourez le catalogue pour en créer une." />
+                  )}
+                </section>
               )}
 
-              <h3>Priorités hautes</h3>
-              {home.agent.highPriority.length > 0 ? (
-                <ul className="home-decision-list">
-                  {home.agent.highPriority.map((item) => (
-                    <li key={item.id}>
-                      <Link to={`/demandes/${item.id}`}>{item.reference}</Link> — {item.title} ({item.priority})
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p>Aucun dossier prioritaire.</p>
+              <section className="panel">
+                <header className="panel-head">
+                  <h2>Dernières décisions</h2>
+                </header>
+                {home.requester.recentDecisions.length > 0 ? (
+                  <ul className="activity-list">
+                    {home.requester.recentDecisions.map((decision, index) => (
+                      <li key={`${decision.requestId}-${index}`}>
+                        <span className={`activity-dot dot-${decision.action.toLowerCase()}`} aria-hidden="true" />
+                        <div>
+                          <p className="activity-title">{actionLabel(decision.action)}</p>
+                          <p className="activity-meta">
+                            <Link to={`/demandes/${decision.requestId}`} className="reference">
+                              {decision.reference}
+                            </Link>{' '}
+                            · {formatDate(decision.occurredAt)}
+                          </p>
+                          {decision.comment && <p className="activity-comment">{decision.comment}</p>}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <EmptyState message="Aucune décision récente sur vos demandes." />
+                )}
+              </section>
+            </div>
+
+            <div className="home-col">
+              {home.agent && (
+                <section className="panel">
+                  <header className="panel-head">
+                    <h2>Mes demandes récentes</h2>
+                    <Link to="/mes-demandes">Tout voir</Link>
+                  </header>
+                  {home.requester.requests.length > 0 ? (
+                    <ul className="activity-list">
+                      {home.requester.requests.map((item) => (
+                        <li key={item.id}>
+                          <span className={`activity-dot status-dot-${item.status.toLowerCase()}`} aria-hidden="true" />
+                          <div>
+                            <Link to={`/demandes/${item.id}`} className="reference">
+                              {item.reference}
+                            </Link>
+                            <p className="activity-title">{statusLabel(item.status)}</p>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <EmptyState message="Vous n'avez soumis aucune demande." />
+                  )}
+                </section>
               )}
-            </section>
-          )}
-        </div>
+
+              <section className="panel">
+                <header className="panel-head">
+                  <h2>Démarrer</h2>
+                </header>
+                {/* Une nouvelle demande passe toujours par le choix d'un type dans le
+                    catalogue (§6.2) : il n'existe pas de formulaire "générique". */}
+                <div className="panel-actions">
+                  <Link to="/catalogue" className="button-link">
+                    Nouvelle demande
+                  </Link>
+                  <Link to="/mes-demandes" className="button-link button-link-secondary">
+                    Suivre mes demandes
+                  </Link>
+                </div>
+              </section>
+            </div>
+          </div>
+        </>
       )}
     </section>
   );

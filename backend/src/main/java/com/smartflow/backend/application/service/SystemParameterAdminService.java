@@ -3,12 +3,14 @@ package com.smartflow.backend.application.service;
 import com.smartflow.backend.application.security.AuthorizationService;
 import com.smartflow.backend.crosscutting.audit.AuditService;
 import com.smartflow.backend.crosscutting.security.LoginAttemptListener;
+import com.smartflow.backend.crosscutting.security.SessionTimeoutListener;
 import com.smartflow.backend.domain.entity.SystemParameter;
 import com.smartflow.backend.domain.entity.User;
 import com.smartflow.backend.domain.exception.AdministrationValidationException;
 import com.smartflow.backend.domain.exception.EntityNotFoundException;
 import com.smartflow.backend.infrastructure.repository.SystemParameterRepository;
 import com.smartflow.backend.infrastructure.scheduler.RequestArchivalScheduler;
+import com.smartflow.backend.infrastructure.scheduler.SlaSweepScheduler;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -17,13 +19,14 @@ import java.util.Locale;
 
 /**
  * §6.10 - "Paramètres généraux : formats acceptés, taille maximale des fichiers, durée des
- * sessions et seuils d'alerte." (la durée des sessions elle-même n'est pas encore
- * administrable, voir CATALOG's own comment) plus les autres seuils/fenêtres déjà
- * administrables via SystemParameter ailleurs dans le code (RG-08, RG-09, RG-12, §13). Ce
- * service n'ajoute aucune nouvelle règle métier : chaque clé du catalogue reste lue,
- * parsée et par défaut exactement comme avant, dans la classe qui la consomme
- * (AttachmentService, LoginAttemptListener, WorkflowTransitionService,
- * RequestArchivalScheduler, AuthorizationService) - CATALOG n'est qu'une vue
+ * sessions et seuils d'alerte." Les quatre sont désormais couverts (la durée des sessions
+ * par SessionTimeoutListener, les seuils d'alerte par SlaSweepScheduler), plus les autres
+ * seuils/fenêtres déjà administrables via SystemParameter ailleurs dans le code (RG-08,
+ * RG-09, RG-12, §13). Ce service n'ajoute aucune nouvelle règle métier : chaque clé du
+ * catalogue reste lue, parsée et par défaut exactement comme avant, dans la classe qui la
+ * consomme (AttachmentService, LoginAttemptListener, WorkflowTransitionService,
+ * RequestArchivalScheduler, AuthorizationService, SessionTimeoutListener,
+ * SlaSweepScheduler) - CATALOG n'est qu'une vue
  * d'administration par-dessus SystemParameterRepository, sa propre copie du libellé/
  * défaut/type de chaque clé étant strictement informative (à tenir synchronisée
  * manuellement si l'une de ces classes change son défaut).
@@ -72,7 +75,17 @@ public class SystemParameterAdminService {
             new ParameterDescriptor(RequestArchivalScheduler.ARCHIVE_AFTER_MONTHS_KEY,
                     "Délai avant archivage (mois)",
                     "RG-12 - ancienneté, en mois, à partir de laquelle une demande close/annulée est archivée.",
-                    ParameterType.INTEGER, "24")
+                    ParameterType.INTEGER, "24"),
+            new ParameterDescriptor(SessionTimeoutListener.SESSION_TIMEOUT_MINUTES_KEY,
+                    "Durée des sessions (minutes)",
+                    "§6.1/§6.10 - durée d'inactivité au-delà de laquelle une session expire. "
+                            + "S'applique aux connexions suivantes, jamais aux sessions déjà ouvertes.",
+                    ParameterType.INTEGER, "30"),
+            new ParameterDescriptor(SlaSweepScheduler.WARNING_THRESHOLD_PERCENT_KEY,
+                    "Seuil d'alerte SLA (% du délai consommé)",
+                    "§6.7/§6.10 - pourcentage du délai de résolution à partir duquel une demande passe "
+                            + "« à risque » et déclenche l'alerte SLA_WARNING.",
+                    ParameterType.INTEGER, "80")
     );
 
     private final SystemParameterRepository systemParameterRepository;

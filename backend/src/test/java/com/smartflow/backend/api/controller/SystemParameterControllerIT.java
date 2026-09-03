@@ -2,12 +2,14 @@ package com.smartflow.backend.api.controller;
 
 import com.smartflow.backend.crosscutting.security.SmartFlowUserDetails;
 import com.smartflow.backend.crosscutting.security.LoginAttemptListener;
+import com.smartflow.backend.crosscutting.security.SessionTimeoutListener;
 import com.smartflow.backend.application.security.AuthorizationService;
 import com.smartflow.backend.domain.entity.User;
 import com.smartflow.backend.domain.entity.UserRoleAssignment;
 import com.smartflow.backend.domain.enums.Role;
 import com.smartflow.backend.domain.enums.ScopeType;
 import com.smartflow.backend.infrastructure.repository.AuditLogRepository;
+import com.smartflow.backend.infrastructure.scheduler.SlaSweepScheduler;
 import com.smartflow.backend.infrastructure.repository.UserRepository;
 import com.smartflow.backend.infrastructure.repository.UserRoleAssignmentRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -110,9 +112,14 @@ class SystemParameterControllerIT {
     void listsCatalogWithDefaults() throws Exception {
         mockMvc.perform(get("/api/v1/admin/system-parameters").with(user(asFunctionalAdmin)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(7))
+                .andExpect(jsonPath("$.length()").value(9))
                 .andExpect(jsonPath("$[?(@.key=='" + LoginAttemptListener.MAX_ATTEMPTS_KEY + "')].value").value("5"))
-                .andExpect(jsonPath("$[?(@.key=='" + LoginAttemptListener.MAX_ATTEMPTS_KEY + "')].overridden").value(false));
+                .andExpect(jsonPath("$[?(@.key=='" + LoginAttemptListener.MAX_ATTEMPTS_KEY + "')].overridden").value(false))
+                // §6.10 nomme quatre paramètres généraux : formats acceptés et taille maximale
+                // des pièces jointes (déjà présents), plus la durée des sessions et les seuils
+                // d'alerte, ajoutés dans ce lot - les quatre sont désormais administrables.
+                .andExpect(jsonPath("$[?(@.key=='" + SessionTimeoutListener.SESSION_TIMEOUT_MINUTES_KEY + "')].value").value("30"))
+                .andExpect(jsonPath("$[?(@.key=='" + SlaSweepScheduler.WARNING_THRESHOLD_PERCENT_KEY + "')].value").value("80"));
     }
 
     @Test

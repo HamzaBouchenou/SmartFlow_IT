@@ -184,4 +184,45 @@ class CatalogAdminControllerIT {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.active").value(false));
     }
+
+    @Test
+    @DisplayName("UpsertRequestTypeRequest.reopenAllowed is nullable - omitting the key defaults to allowed (RG-08)")
+    void createRequestTypeWithoutReopenAllowedKeyDefaultsToAllowed() throws Exception {
+        // Same class of bug as UpsertStepRequest (CLAUDE.md): reopenAllowed used to be a
+        // primitive boolean, so a client omitting the key entirely got MALFORMED_REQUEST
+        // (400) instead of the RG-08 default (allowed) that the DB column itself carries
+        // (request_types.reopen_allowed not null default true, V8).
+        String body = objectMapper.writeValueAsString(Map.of(
+                "serviceCatalogId", service.getId(), "name", "Demande sans clé reopenAllowed", "displayOrder", 1));
+
+        mockMvc.perform(post("/api/v1/admin/request-types").with(user(asAdmin)).with(csrf())
+                        .contentType("application/json").content(body))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.reopenAllowed").value(true));
+    }
+
+    @Test
+    @DisplayName("UpsertRequestTypeRequest.displayOrder stays mandatory - a clean VALIDATION_ERROR, not MALFORMED_REQUEST, when it is missing")
+    void createRequestTypeWithoutDisplayOrderIsRejectedCleanly() throws Exception {
+        String body = objectMapper.writeValueAsString(Map.of(
+                "serviceCatalogId", service.getId(), "name", "Demande sans displayOrder"));
+
+        mockMvc.perform(post("/api/v1/admin/request-types").with(user(asAdmin)).with(csrf())
+                        .contentType("application/json").content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
+                .andExpect(jsonPath("$.fieldErrors[0].field").value("displayOrder"));
+    }
+
+    @Test
+    @DisplayName("UpsertServiceCatalogRequest.displayOrder stays mandatory - a clean VALIDATION_ERROR, not MALFORMED_REQUEST, when it is missing")
+    void createServiceWithoutDisplayOrderIsRejectedCleanly() throws Exception {
+        String body = objectMapper.writeValueAsString(Map.of("name", "Sans displayOrder", "departmentId", department.getId()));
+
+        mockMvc.perform(post("/api/v1/admin/services").with(user(asAdmin)).with(csrf())
+                        .contentType("application/json").content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
+                .andExpect(jsonPath("$.fieldErrors[0].field").value("displayOrder"));
+    }
 }

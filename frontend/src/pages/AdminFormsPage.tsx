@@ -170,7 +170,6 @@ export function AdminFormsPage() {
 
   return (
     <section>
-      <h1>Formulaires</h1>
 
       <div className="task-filters">
         <select value={serviceId ?? ''} onChange={(event) => setServiceId(event.target.value ? Number(event.target.value) : null)}>
@@ -197,46 +196,48 @@ export function AdminFormsPage() {
 
       {!loading && !error && requestTypeId !== null && (
         <>
-          <table className="task-table">
-            <thead>
-              <tr>
-                <th>Version</th>
-                <th>Statut</th>
-                <th>Publiée le</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {versions.map((version) => (
-                <tr key={version.id}>
-                  <td>
-                    <button type="button" className="link-button" onClick={() => void selectVersion(version.id)}>
-                      v{version.version}
-                    </button>
-                  </td>
-                  <td>{version.status}</td>
-                  <td>{formatDate(version.publishedAt)}</td>
-                  <td>
-                    {version.status === 'DRAFT' && (
-                      <>
-                        <button type="button" onClick={() => void handlePublish(version.id)}>
-                          Publier
-                        </button>{' '}
-                        <button type="button" onClick={() => void handleDeleteDraft(version.id)}>
-                          Supprimer
-                        </button>
-                      </>
-                    )}
-                  </td>
-                </tr>
-              ))}
-              {versions.length === 0 && (
+          <div className="table-scroll">
+            <table className="task-table">
+              <thead>
                 <tr>
-                  <td colSpan={4}>Aucune version pour ce type de demande.</td>
+                  <th>Version</th>
+                  <th>Statut</th>
+                  <th>Publiée le</th>
+                  <th></th>
                 </tr>
-              )}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {versions.map((version) => (
+                  <tr key={version.id}>
+                    <td>
+                      <button type="button" className="link-button" onClick={() => void selectVersion(version.id)}>
+                        v{version.version}
+                      </button>
+                    </td>
+                    <td>{version.status}</td>
+                    <td>{formatDate(version.publishedAt)}</td>
+                    <td>
+                      {version.status === 'DRAFT' && (
+                        <>
+                          <button type="button" onClick={() => void handlePublish(version.id)}>
+                            Publier
+                          </button>{' '}
+                          <button type="button" onClick={() => void handleDeleteDraft(version.id)}>
+                            Supprimer
+                          </button>
+                        </>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+                {versions.length === 0 && (
+                  <tr>
+                    <td colSpan={4}>Aucune version pour ce type de demande.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
 
           {!versions.some((version) => version.status === 'DRAFT') && (
             <button type="button" onClick={() => void handleCreateDraft()}>

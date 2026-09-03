@@ -1,12 +1,26 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import * as profileApi from '../api/profile';
+import type { NotificationPreferenceResponse, NotificationType } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { ErrorBanner } from '../components/ErrorBanner';
 
+/** §6.8 - libellés d'affichage seulement : la liste des types et lesquels sont obligatoires
+ * viennent toujours du serveur (MandatoryNotificationRule/ADR-12), jamais d'ici. */
+const NOTIFICATION_LABELS: Record<NotificationType, string> = {
+  SUBMISSION: 'Soumission d’une demande',
+  ASSIGNMENT: 'Affectation d’une demande',
+  INFO_REQUESTED: 'Demande de complément',
+  DECISION: 'Décision (validation, rejet, retour)',
+  SLA_WARNING: 'Échéance SLA proche',
+  SLA_BREACH: 'Échéance SLA dépassée',
+  CLOSURE: 'Clôture d’une demande',
+};
+
 /** §6.1 - libre-service : "Consultation et mise à jour des informations de profil
  * autorisées" (prénom/nom seulement - jamais l'e-mail, le service ou le responsable
- * hiérarchique, réservés à un administrateur fonctionnel, ProfileController.java) et
- * changement de mot de passe (exige l'ancien, distinct d'une réinitialisation admin). */
+ * hiérarchique, réservés à un administrateur fonctionnel, ProfileController.java),
+ * changement de mot de passe (exige l'ancien, distinct d'une réinitialisation admin) et
+ * §6.8 préférences de notification par e-mail. */
 export function ProfilePage() {
   const { user } = useAuth();
   const [firstName, setFirstName] = useState(user?.firstName ?? '');
@@ -20,6 +34,46 @@ export function ProfilePage() {
   const [passwordError, setPasswordError] = useState<unknown>(null);
   const [passwordSaved, setPasswordSaved] = useState(false);
   const [savingPassword, setSavingPassword] = useState(false);
+
+  const [preferences, setPreferences] = useState<NotificationPreferenceResponse[]>([]);
+  const [preferenceError, setPreferenceError] = useState<unknown>(null);
+  const [savingPreference, setSavingPreference] = useState<NotificationType | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    profileApi
+      .listNotificationPreferences()
+      .then((loaded) => {
+        if (!cancelled) {
+          setPreferences(loaded);
+        }
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setPreferenceError(error);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /** §6.8 - le serveur reste seul juge : un type obligatoire est refusé côté API (ADR-12),
+   * l'écran se contente de désactiver la bascule et de relire la réponse. */
+  async function handlePreferenceToggle(type: NotificationType, emailEnabled: boolean) {
+    setSavingPreference(type);
+    setPreferenceError(null);
+    try {
+      const updated = await profileApi.updateNotificationPreference(type, { emailEnabled });
+      setPreferences((current) =>
+        current.map((preference) => (preference.notificationType === type ? updated : preference)),
+      );
+    } catch (error) {
+      setPreferenceError(error);
+    } finally {
+      setSavingPreference(null);
+    }
+  }
 
   async function handleProfileSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -55,7 +109,6 @@ export function ProfilePage() {
 
   return (
     <section className="profile-page">
-      <h1>Mon profil</h1>
 
       <form className="action-form" onSubmit={(event) => void handleProfileSubmit(event)}>
         <h2>Informations de profil</h2>
@@ -111,6 +164,33 @@ export function ProfilePage() {
           </button>
         </div>
       </form>
+
+      <section className="notification-preferences">
+        <h2>Préférences de notification</h2>
+        <p className="form-hint">
+          Les alertes d’échéance SLA restent toujours envoyées : §6.8 interdit de désactiver
+          une alerte obligatoire.
+        </p>
+        <ErrorBanner error={preferenceError} />
+        <ul className="preference-list">
+          {preferences.map((preference) => (
+            <li key={preference.notificationType}>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={preference.emailEnabled}
+                  disabled={preference.mandatory || savingPreference === preference.notificationType}
+                  onChange={(event) =>
+                    void handlePreferenceToggle(preference.notificationType, event.target.checked)
+                  }
+                />
+                {NOTIFICATION_LABELS[preference.notificationType] ?? preference.notificationType}
+              </label>
+              {preference.mandatory && <span className="preference-mandatory">obligatoire</span>}
+            </li>
+          ))}
+        </ul>
+      </section>
     </section>
   );
 }

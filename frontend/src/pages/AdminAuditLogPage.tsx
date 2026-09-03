@@ -51,7 +51,6 @@ export function AdminAuditLogPage() {
 
   return (
     <section>
-      <h1>Journal d'audit</h1>
 
       <div className="task-filters">
         <input
@@ -77,38 +76,40 @@ export function AdminAuditLogPage() {
 
       {result && (
         <>
-          <table className="task-table">
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Acteur</th>
-                <th>Action</th>
-                <th>Objet</th>
-                <th>Résultat</th>
-                <th>Résumé</th>
-              </tr>
-            </thead>
-            <tbody>
-              {result.content.map((entry) => (
-                <tr key={entry.id}>
-                  <td>{formatDate(entry.occurredAt)}</td>
-                  <td>{entry.actorName ?? 'Système'}</td>
-                  <td>{entry.action}</td>
-                  <td>
-                    {entry.objectType}
-                    {entry.objectId ? ` #${entry.objectId}` : ''}
-                  </td>
-                  <td>{entry.result}</td>
-                  <td>{entry.summary ?? '—'}</td>
-                </tr>
-              ))}
-              {result.content.length === 0 && (
+          <div className="table-scroll">
+            <table className="task-table">
+              <thead>
                 <tr>
-                  <td colSpan={6}>Aucune entrée pour ces filtres.</td>
+                  <th>Date</th>
+                  <th>Acteur</th>
+                  <th>Action</th>
+                  <th>Objet</th>
+                  <th>Résultat</th>
+                  <th>Résumé</th>
                 </tr>
-              )}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {result.content.map((entry) => (
+                  <tr key={entry.id}>
+                    <td>{formatDate(entry.occurredAt)}</td>
+                    <td>{entry.actorName ?? 'Système'}</td>
+                    <td>{entry.action}</td>
+                    <td>
+                      {entry.objectType}
+                      {entry.objectId ? ` #${entry.objectId}` : ''}
+                    </td>
+                    <td>{entry.result}</td>
+                    <td>{entry.summary ?? '—'}</td>
+                  </tr>
+                ))}
+                {result.content.length === 0 && (
+                  <tr>
+                    <td colSpan={6}>Aucune entrée pour ces filtres.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
 
           <div className="pagination">
             <button type="button" disabled={page === 0} onClick={() => setPage((current) => current - 1)}>

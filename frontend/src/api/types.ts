@@ -137,6 +137,10 @@ export interface RequestDetailResponse {
   submittedAt: string | null;
   fieldValues: Record<string, string>;
   availableActions: WorkflowAction[];
+  // "Qualifier" (§5/RG-07) n'est pas un WorkflowAction (jamais dans availableActions[] ci-
+  // dessus) : canQualify suit exactement le même principe que availableActions - dérivé
+  // d'AuthorizationService.canQualify côté serveur, jamais d'une règle de rôle recopiée ici.
+  canQualify: boolean;
   assignedUserId: number | null;
   assignedUserName: string | null;
   assignedTeamId: number | null;
@@ -201,6 +205,26 @@ export interface UpdateRequestRequest {
   title: string;
   description?: string | null;
   fieldValues?: Record<string, string>;
+}
+
+// --- api/dto/request/QualifyRequestRequest (§5/RG-07) --------------------------------
+
+export interface QualifyRequestRequest {
+  priority: Priority;
+}
+
+// --- api/dto/{request,response}/*NotificationPreference* (§6.8) ----------------------
+// `mandatory` vient de MandatoryNotificationRule côté serveur (ADR-12) : l'écran affiche
+// ces types verrouillés sans jamais recopier la liste des types obligatoires ici.
+
+export interface NotificationPreferenceResponse {
+  notificationType: NotificationType;
+  emailEnabled: boolean;
+  mandatory: boolean;
+}
+
+export interface UpdateNotificationPreferenceRequest {
+  emailEnabled: boolean;
 }
 
 export interface ExecuteTransitionRequest {

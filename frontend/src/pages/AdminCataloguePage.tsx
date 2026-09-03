@@ -84,71 +84,74 @@ export function AdminCataloguePage() {
 
   return (
     <section>
-      <h1>Catalogue</h1>
       <ErrorBanner error={error} />
       {loading && <p className="page-loading">Chargement…</p>}
 
       {!loading && !error && (
         <>
           <h2>Services</h2>
-          <table className="task-table">
-            <thead>
-              <tr>
-                <th>Nom</th>
-                <th>Département</th>
-                <th>Statut</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {services.map((service) => (
-                <tr key={service.id} className={service.id === selectedServiceId ? 'status-submitted' : undefined}>
-                  <td>
-                    <button type="button" className="link-button" onClick={() => setSelectedServiceId(service.id)}>
-                      {service.name}
-                    </button>
-                  </td>
-                  <td>{service.departmentName}</td>
-                  <td>{service.active ? 'Actif' : 'Désactivé'}</td>
-                  <td>
-                    <ToggleServiceButton service={service} onChanged={upsertService} />
-                  </td>
+          <div className="table-scroll">
+            <table className="task-table">
+              <thead>
+                <tr>
+                  <th>Nom</th>
+                  <th>Département</th>
+                  <th>Statut</th>
+                  <th></th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {services.map((service) => (
+                  <tr key={service.id} className={service.id === selectedServiceId ? 'status-submitted' : undefined}>
+                    <td>
+                      <button type="button" className="link-button" onClick={() => setSelectedServiceId(service.id)}>
+                        {service.name}
+                      </button>
+                    </td>
+                    <td>{service.departmentName}</td>
+                    <td>{service.active ? 'Actif' : 'Désactivé'}</td>
+                    <td>
+                      <ToggleServiceButton service={service} onChanged={upsertService} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
           <CreateServiceForm departments={departments} onCreated={upsertService} />
 
           {selectedServiceId !== null && (
             <>
               <h2>Types de demande</h2>
-              <table className="task-table">
-                <thead>
-                  <tr>
-                    <th>Nom</th>
-                    <th>Réouverture (RG-08)</th>
-                    <th>Statut</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {requestTypes.map((requestType) => (
-                    <tr key={requestType.id}>
-                      <td>{requestType.name}</td>
-                      <td>{requestType.reopenAllowed ? 'Autorisée' : 'Non autorisée'}</td>
-                      <td>{requestType.active ? 'Actif' : 'Désactivé'}</td>
-                      <td>
-                        <ToggleRequestTypeButton requestType={requestType} onChanged={upsertRequestType} />
-                      </td>
-                    </tr>
-                  ))}
-                  {requestTypes.length === 0 && (
+              <div className="table-scroll">
+                <table className="task-table">
+                  <thead>
                     <tr>
-                      <td colSpan={4}>Aucun type de demande pour ce service.</td>
+                      <th>Nom</th>
+                      <th>Réouverture (RG-08)</th>
+                      <th>Statut</th>
+                      <th></th>
                     </tr>
-                  )}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {requestTypes.map((requestType) => (
+                      <tr key={requestType.id}>
+                        <td>{requestType.name}</td>
+                        <td>{requestType.reopenAllowed ? 'Autorisée' : 'Non autorisée'}</td>
+                        <td>{requestType.active ? 'Actif' : 'Désactivé'}</td>
+                        <td>
+                          <ToggleRequestTypeButton requestType={requestType} onChanged={upsertRequestType} />
+                        </td>
+                      </tr>
+                    ))}
+                    {requestTypes.length === 0 && (
+                      <tr>
+                        <td colSpan={4}>Aucun type de demande pour ce service.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
               <CreateRequestTypeForm serviceCatalogId={selectedServiceId} onCreated={upsertRequestType} />
             </>
           )}

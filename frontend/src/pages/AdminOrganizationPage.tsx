@@ -59,7 +59,6 @@ export function AdminOrganizationPage() {
 
   return (
     <section>
-      <h1>Organisation</h1>
       <ErrorBanner error={error} />
       {loading && <p className="page-loading">Chargement…</p>}
 
@@ -102,35 +101,37 @@ function DepartmentTable({
   return (
     <>
       <ErrorBanner error={error} />
-      <table className="task-table">
-        <thead>
-          <tr>
-            <th>Nom</th>
-            <th>Rattachée à</th>
-            <th>Statut</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {departments.map((department) => (
-            <tr key={department.id}>
-              <td>{department.name}</td>
-              <td>{department.parentName ?? '— (direction)'}</td>
-              <td>{department.active ? 'Active' : 'Désactivée'}</td>
-              <td>
-                <button type="button" onClick={() => void toggle(department)}>
-                  {department.active ? 'Désactiver' : 'Activer'}
-                </button>
-              </td>
-            </tr>
-          ))}
-          {departments.length === 0 && (
+      <div className="table-scroll">
+        <table className="task-table">
+          <thead>
             <tr>
-              <td colSpan={4}>Aucune direction/service pour l'instant.</td>
+              <th>Nom</th>
+              <th>Rattachée à</th>
+              <th>Statut</th>
+              <th></th>
             </tr>
-          )}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {departments.map((department) => (
+              <tr key={department.id}>
+                <td>{department.name}</td>
+                <td>{department.parentName ?? '— (direction)'}</td>
+                <td>{department.active ? 'Active' : 'Désactivée'}</td>
+                <td>
+                  <button type="button" onClick={() => void toggle(department)}>
+                    {department.active ? 'Désactiver' : 'Activer'}
+                  </button>
+                </td>
+              </tr>
+            ))}
+            {departments.length === 0 && (
+              <tr>
+                <td colSpan={4}>Aucune direction/service pour l'instant.</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
     </>
   );
 }
@@ -206,35 +207,37 @@ function TeamTable({
   return (
     <>
       <ErrorBanner error={error} />
-      <table className="task-table">
-        <thead>
-          <tr>
-            <th>Nom</th>
-            <th>Département</th>
-            <th>Statut</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody>
-          {teams.map((team) => (
-            <tr key={team.id}>
-              <td>{team.name}</td>
-              <td>{team.departmentName}</td>
-              <td>{team.active ? 'Active' : 'Désactivée'}</td>
-              <td>
-                <button type="button" onClick={() => void toggle(team)}>
-                  {team.active ? 'Désactiver' : 'Activer'}
-                </button>
-              </td>
-            </tr>
-          ))}
-          {teams.length === 0 && (
+      <div className="table-scroll">
+        <table className="task-table">
+          <thead>
             <tr>
-              <td colSpan={4}>Aucune équipe pour l'instant.</td>
+              <th>Nom</th>
+              <th>Département</th>
+              <th>Statut</th>
+              <th></th>
             </tr>
-          )}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {teams.map((team) => (
+              <tr key={team.id}>
+                <td>{team.name}</td>
+                <td>{team.departmentName}</td>
+                <td>{team.active ? 'Active' : 'Désactivée'}</td>
+                <td>
+                  <button type="button" onClick={() => void toggle(team)}>
+                    {team.active ? 'Désactiver' : 'Activer'}
+                  </button>
+                </td>
+              </tr>
+            ))}
+            {teams.length === 0 && (
+              <tr>
+                <td colSpan={4}>Aucune équipe pour l'instant.</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
       {departments.length === 0 && <p className="page-loading">Créez d'abord une direction/service ci-dessus.</p>}
     </>
   );

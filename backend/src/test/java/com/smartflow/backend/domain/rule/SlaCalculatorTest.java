@@ -27,6 +27,10 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class SlaCalculatorTest {
 
+    /** §6.10 - le seuil est désormais administrable (SlaSweepScheduler's own key) ; 80 % reste
+     * le défaut, et la valeur avec laquelle les cas historiques ci-dessous ont été écrits. */
+    private static final int DEFAULT_THRESHOLD_PERCENT = 80;
+
     private final SlaCalculator calculator = new SlaCalculator();
 
     @Test
@@ -130,7 +134,7 @@ class SlaCalculatorTest {
         int allowedMinutes = 100;
         Instant now = start.plus(Duration.ofMinutes(50)); // 50% elapsed
 
-        SlaStatus status = calculator.computeStatus(now, start, allowedMinutes, List.of());
+        SlaStatus status = calculator.computeStatus(now, start, allowedMinutes, List.of(), DEFAULT_THRESHOLD_PERCENT);
 
         assertThat(status).isEqualTo(SlaStatus.ON_TRACK);
     }
@@ -142,7 +146,7 @@ class SlaCalculatorTest {
         int allowedMinutes = 100;
         Instant now = start.plus(Duration.ofMinutes(85)); // past the 80% boundary
 
-        SlaStatus status = calculator.computeStatus(now, start, allowedMinutes, List.of());
+        SlaStatus status = calculator.computeStatus(now, start, allowedMinutes, List.of(), DEFAULT_THRESHOLD_PERCENT);
 
         assertThat(status).isEqualTo(SlaStatus.AT_RISK);
     }
@@ -154,7 +158,7 @@ class SlaCalculatorTest {
         int allowedMinutes = 100;
         Instant now = start.plus(Duration.ofMinutes(100)); // exactly the due date
 
-        SlaStatus status = calculator.computeStatus(now, start, allowedMinutes, List.of());
+        SlaStatus status = calculator.computeStatus(now, start, allowedMinutes, List.of(), DEFAULT_THRESHOLD_PERCENT);
 
         assertThat(status).isEqualTo(SlaStatus.OVERDUE);
     }
@@ -171,8 +175,35 @@ class SlaCalculatorTest {
                 start.plus(Duration.ofMinutes(40)));
         Instant now = start.plus(Duration.ofMinutes(105));
 
-        SlaStatus status = calculator.computeStatus(now, start, allowedMinutes, List.of(suspension));
+        SlaStatus status = calculator.computeStatus(now, start, allowedMinutes, List.of(suspension), DEFAULT_THRESHOLD_PERCENT);
 
         assertThat(status).isEqualTo(SlaStatus.ON_TRACK);
+    }
+
+    @Test
+    @DisplayName("§6.10 - le seuil d'alerte est administrable : à 50 %, la même demande bascule AT_RISK bien plus tôt")
+    void computeStatus_honoursAConfiguredWarningThreshold() {
+        Instant start = Instant.parse("2026-08-25T09:00:00Z");
+        int allowedMinutes = 100;
+        Instant now = start.plus(Duration.ofMinutes(60)); // 60 % consommés
+
+        // Au seuil par défaut (80 %), 60 % de délai consommé reste "dans le délai"...
+        assertThat(calculator.computeStatus(now, start, allowedMinutes, List.of(), DEFAULT_THRESHOLD_PERCENT))
+                .isEqualTo(SlaStatus.ON_TRACK);
+        // ...alors qu'un seuil administré à 50 % fait basculer la même demande "à risque".
+        assertThat(calculator.computeStatus(now, start, allowedMinutes, List.of(), 50))
+                .isEqualTo(SlaStatus.AT_RISK);
+    }
+
+    @Test
+    @DisplayName("§6.10 - un seuil à 100 % ne laisse aucune fenêtre « à risque » : on passe directement en retard")
+    void computeStatus_withHundredPercentThreshold_neverReportsAtRisk() {
+        Instant start = Instant.parse("2026-08-25T09:00:00Z");
+        int allowedMinutes = 100;
+
+        assertThat(calculator.computeStatus(start.plus(Duration.ofMinutes(99)), start, allowedMinutes, List.of(), 100))
+                .isEqualTo(SlaStatus.ON_TRACK);
+        assertThat(calculator.computeStatus(start.plus(Duration.ofMinutes(100)), start, allowedMinutes, List.of(), 100))
+                .isEqualTo(SlaStatus.OVERDUE);
     }
 }

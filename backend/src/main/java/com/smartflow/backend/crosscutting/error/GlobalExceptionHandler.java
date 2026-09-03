@@ -15,6 +15,7 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
@@ -84,6 +85,20 @@ public class GlobalExceptionHandler {
         log.warn("Parameter type mismatch: {}", ex.getMessage());
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .body(ErrorResponse.of("VALIDATION_ERROR", "Paramètre '" + ex.getName() + "' invalide.", currentTraceId()));
+    }
+
+    /**
+     * A required @RequestParam missing from the query string - e.g. GET
+     * /api/v1/dashboards/service without serviceId. Found in recette (REC-SCN-26):
+     * without this handler it falls through to handleUnexpected below and reports a 500
+     * for what is simply a malformed request, exactly the class of bug handleTypeMismatch
+     * already fixes for a wrongly-typed one (§11.1 - "codes HTTP cohérents").
+     */
+    @ExceptionHandler(MissingServletRequestParameterException.class)
+    public ResponseEntity<ErrorResponse> handleMissingParameter(MissingServletRequestParameterException ex) {
+        log.warn("Missing required parameter: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(ErrorResponse.of("VALIDATION_ERROR", "Paramètre '" + ex.getParameterName() + "' requis.", currentTraceId()));
     }
 
     /**

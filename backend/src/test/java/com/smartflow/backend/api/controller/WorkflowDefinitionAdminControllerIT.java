@@ -145,6 +145,36 @@ class WorkflowDefinitionAdminControllerIT {
     }
 
     @Test
+    @DisplayName("UpsertStepRequest.suspendSla is nullable - a step can be created without sending the key at all")
+    void addStepWithoutSuspendSlaKeySucceeds() throws Exception {
+        // Found by running docs/CAHIER_DE_RECETTE.md's REC-SCN-16 against the real API
+        // (not through the SPA, which always sends the key): suspendSla used to be a
+        // primitive boolean, and Jackson refused a record whose JSON body omitted it
+        // (MALFORMED_REQUEST) instead of defaulting it to false - the exact class of bug
+        // CLAUDE.md already documents for ExecuteTransitionRequest/BulkAssignRequest.
+        long draftId = createDraft();
+        String body = objectMapper.writeValueAsString(Map.of("code", "QUALIFICATION", "name", "Qualification", "displayOrder", 1));
+
+        mockMvc.perform(post("/api/v1/admin/workflow-definitions/{id}/steps", draftId).with(user(asAdmin)).with(csrf())
+                        .contentType("application/json").content(body))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.suspendSla").value(false));
+    }
+
+    @Test
+    @DisplayName("UpsertStepRequest.displayOrder stays mandatory - a clean VALIDATION_ERROR, not MALFORMED_REQUEST, when it is missing")
+    void addStepWithoutDisplayOrderIsRejectedCleanly() throws Exception {
+        long draftId = createDraft();
+        String body = objectMapper.writeValueAsString(Map.of("code", "QUALIFICATION", "name", "Qualification", "suspendSla", false));
+
+        mockMvc.perform(post("/api/v1/admin/workflow-definitions/{id}/steps", draftId).with(user(asAdmin)).with(csrf())
+                        .contentType("application/json").content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_ERROR"))
+                .andExpect(jsonPath("$.fieldErrors[0].field").value("displayOrder"));
+    }
+
+    @Test
     @DisplayName("§6.5 - a transition targeting a step of another workflow version is refused")
     void crossWorkflowTransitionIsRefused() throws Exception {
         // v1 reste DRAFT ici : le but est d'isoler la garde "même workflow" de la garde

@@ -2,6 +2,7 @@ package com.smartflow.backend.application.security;
 
 import com.smartflow.backend.domain.entity.Department;
 import com.smartflow.backend.domain.entity.Request;
+import com.smartflow.backend.domain.entity.RequestHistory;
 import com.smartflow.backend.domain.entity.Step;
 import com.smartflow.backend.domain.entity.TaskAssignment;
 import com.smartflow.backend.domain.entity.Team;
@@ -15,6 +16,7 @@ import com.smartflow.backend.domain.rule.RolePermissionRule;
 import com.smartflow.backend.domain.rule.ScopeRule;
 import com.smartflow.backend.domain.rule.SeparationOfDutiesRule;
 import com.smartflow.backend.domain.rule.WorkflowActionAvailabilityRule;
+import com.smartflow.backend.infrastructure.repository.RequestHistoryRepository;
 import com.smartflow.backend.infrastructure.repository.SystemParameterRepository;
 import com.smartflow.backend.infrastructure.repository.TaskAssignmentRepository;
 import com.smartflow.backend.infrastructure.repository.TransitionRepository;
@@ -23,6 +25,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 /**
@@ -63,6 +66,7 @@ public class AuthorizationService {
     private final UserRoleAssignmentRepository userRoleAssignmentRepository;
     private final TaskAssignmentRepository taskAssignmentRepository;
     private final TransitionRepository transitionRepository;
+    private final RequestHistoryRepository requestHistoryRepository;
     private final SystemParameterRepository systemParameterRepository;
     private final RolePermissionRule rolePermissionRule;
     private final ScopeRule scopeRule;
@@ -72,6 +76,7 @@ public class AuthorizationService {
     public AuthorizationService(UserRoleAssignmentRepository userRoleAssignmentRepository,
                                  TaskAssignmentRepository taskAssignmentRepository,
                                  TransitionRepository transitionRepository,
+                                 RequestHistoryRepository requestHistoryRepository,
                                  SystemParameterRepository systemParameterRepository,
                                  RolePermissionRule rolePermissionRule,
                                  ScopeRule scopeRule,
@@ -80,6 +85,7 @@ public class AuthorizationService {
         this.userRoleAssignmentRepository = userRoleAssignmentRepository;
         this.taskAssignmentRepository = taskAssignmentRepository;
         this.transitionRepository = transitionRepository;
+        this.requestHistoryRepository = requestHistoryRepository;
         this.systemParameterRepository = systemParameterRepository;
         this.rolePermissionRule = rolePermissionRule;
         this.scopeRule = scopeRule;
@@ -154,6 +160,26 @@ public class AuthorizationService {
         return userRoleAssignmentRepository.findByUserId(actingUser.getId()).stream()
                 .anyMatch(assignment -> assignment.getRole() != Role.AUDITOR
                         && scopeRule.covers(assignment.getScopeType(), assignment.getScopeId(), context));
+    }
+
+    /**
+     * §5/RG-07 - "qualifier" une demande soumise : poser sa Priority. RolePermissionRule's
+     * own comment already flags "qualifier" as one of the AGENT's four responsibilities that
+     * is not itself a WorkflowAction (only "prendre en charge"/ASSIGN and "résoudre"/CLOSE
+     * are), so it needs its own decision here rather than a fifth WorkflowAction with no
+     * Transition to ever resolve it. Reuses exactly the eligibility canAct already computes
+     * for this request's current step: whoever could legally perform at least one
+     * WorkflowAction here is exactly who should be trusted to set its priority - a request
+     * with no current step (DRAFT/CLOSED/CANCELLED/ARCHIVED) has nobody canAct would ever
+     * admit anyway, so this naturally also gates qualify() to a SUBMITTED, in-flight request
+     * without a separate status check. Also the single point of truth
+     * WorkflowTransitionService.assign/pickAutoAssignedUserId reuse for "is this candidate a
+     * legitimate target of ASSIGN" (ADR-18) - one definition of "eligible on this request",
+     * never two that could drift apart.
+     */
+    @Transactional(readOnly = true)
+    public boolean canQualify(User actingUser, Request request) {
+        return Arrays.stream(WorkflowAction.values()).anyMatch(action -> canAct(actingUser, request, action));
     }
 
     /**
@@ -279,8 +305,44 @@ public class AuthorizationService {
                 .toList();
     }
 
+    /**
+     * ADR-19 (docs/DECISIONS.md) - generalizes ADR-14's fix for canReopen to every other
+     * reader of this 1-arg overload (canView, canAnnotate; canAct calls it too, but never
+     * actually reaches the fallback below - see teamScopeStepForReading's own javadoc).
+     * request.getCurrentStep() is always null once CLOSED (ADR-03), and ScopeRule.TEAM only
+     * ever compares against currentStepTeamId/assignedTeamId, neither of which survives for
+     * an individually-assigned agent (assignedTeamId only covers an unclaimed team-queue
+     * drop - WorkflowTransitionService.assign leaves it null for a named assignee). Without
+     * this, the very agent who resolved and closed a request individually could no longer
+     * even read it afterwards - found in recette against a real docker stack, not a test.
+     */
     private ScopeRule.ScopeContext resolveScopeContext(User actingUser, Request request) {
-        return resolveScopeContext(actingUser, request, request.getCurrentStep());
+        return resolveScopeContext(actingUser, request, teamScopeStepForReading(request));
+    }
+
+    /**
+     * The step whose responsibleTeam should still count for TEAM scope once a request has
+     * left the workflow. A live request simply uses its own currentStep. A CLOSED (or later
+     * ARCHIVED, which only ever comes from CLOSED/CANCELLED) request has none (ADR-03), so
+     * this falls back to the step CLOSE itself left - the same fromStep ADR-14 already
+     * passes explicitly for canReopen, generalized here for every other caller of the 1-arg
+     * resolveScopeContext. A CANCELLED request needs no such fallback: RequestService.cancel
+     * already refuses cancellation the moment any TaskAssignment exists, so a cancelled
+     * request never has an individual assignee whose visibility this would need to preserve.
+     * canAct itself never reaches this fallback in practice - workflowActionAvailabilityRule
+     * already denies every WorkflowAction once currentStep is null, before scope is ever
+     * resolved - so this only changes behaviour for canView/canAnnotate.
+     */
+    private Step teamScopeStepForReading(Request request) {
+        if (request.getCurrentStep() != null) {
+            return request.getCurrentStep();
+        }
+        if (request.getStatus() == RequestStatus.CLOSED || request.getStatus() == RequestStatus.ARCHIVED) {
+            return requestHistoryRepository.findFirstByRequestIdAndActionOrderByOccurredAtDesc(request.getId(), WorkflowAction.CLOSE)
+                    .map(RequestHistory::getFromStep)
+                    .orElse(null);
+        }
+        return null;
     }
 
     /**

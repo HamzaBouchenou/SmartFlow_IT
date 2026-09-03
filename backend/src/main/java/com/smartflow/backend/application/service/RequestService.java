@@ -13,6 +13,7 @@ import com.smartflow.backend.domain.entity.TaskAssignment;
 import com.smartflow.backend.domain.entity.User;
 import com.smartflow.backend.domain.entity.WorkflowDefinition;
 import com.smartflow.backend.domain.enums.NotificationType;
+import com.smartflow.backend.domain.enums.Priority;
 import com.smartflow.backend.domain.enums.PublicationStatus;
 import com.smartflow.backend.domain.enums.RequestStatus;
 import com.smartflow.backend.domain.enums.WorkflowAction;
@@ -266,6 +267,39 @@ public class RequestService {
     }
 
     /**
+     * §5/RG-07 - "qualifier" une demande soumise : poser sa Priority. Sans elle,
+     * SlaSweepScheduler ignore la demande en permanence ("not yet qualified") et RG-07 ne
+     * calcule jamais d'échéance - ce cas d'usage manquait entièrement avant cette session
+     * (voir CLAUDE.md). Volontairement distincte des WorkflowAction du §6.5
+     * (AuthorizationService.canQualify's own javadoc) : elle ne déplace jamais currentStep,
+     * donc aucune Transition ne la gouverne, et elle reste rejouable tant que la demande est
+     * SUBMITTED (une requalification reste une qualification). RG-10 : si l'appelant vient de
+     * valider un AiAnalysis de type suggestion de priorité, c'est cette valeur déjà validée
+     * par un humain qu'il transmet ici - jamais une écriture directe depuis l'IA elle-même,
+     * qui ne touche que AiAnalysis (AiAnalysisService.validate).
+     */
+    @Transactional
+    public Request qualify(User actingUser, Long requestId, Priority priority) {
+        Request request = requestRepository.findById(requestId)
+                .orElseThrow(() -> new EntityNotFoundException("Demande introuvable."));
+        if (request.getStatus() != RequestStatus.SUBMITTED) {
+            throw new InvalidRequestStateException("NOT_SUBMITTED",
+                    "Seule une demande soumise et en cours peut être qualifiée.");
+        }
+        if (!authorizationService.canQualify(actingUser, request)) {
+            throw new EntityNotFoundException("Demande introuvable.");
+        }
+        Priority previous = request.getPriority();
+        request.setPriority(priority);
+        request = requestRepository.save(request);
+        // RG-11 - la priorité gouverne le calcul SLA (RG-07) au même titre qu'un changement
+        // de statut ou d'affectation : une décision auditable, comme le reste de ce service.
+        auditService.record(actingUser, "QUALIFY", "Request", request.getId().toString(),
+                "priority: " + previous + " -> " + priority + ", reference=" + request.getReference());
+        return request;
+    }
+
+    /**
      * §6.9/§9.4 - "vue demandeur : demandes en cours, dernières décisions et délais
      * annoncés". Contrairement à getDetail/getViewable (ADR-10, canView), cette liste ne
      * borne jamais l'accès à autre chose que la propriété du dossier (RG-06 "un demandeur
@@ -334,7 +368,11 @@ public class RequestService {
                         .filter(action -> authorizationService.canAct(actingUser, request, action))
                         .toList();
         TaskAssignment activeAssignment = taskAssignmentRepository.findByRequestIdAndActiveTrue(request.getId()).orElse(null);
-        return new RequestDetailView(request, values, availableActions, activeAssignment);
+        // §5/RG-07 - jamais un bouton "qualifier" posé depuis le rôle côté client
+        // (CLAUDE.md) : canQualify n'est vrai que pour une demande SUBMITTED
+        // (AuthorizationService.canQualify exige un currentStep non nul).
+        boolean canQualify = request.getCurrentStep() != null && authorizationService.canQualify(actingUser, request);
+        return new RequestDetailView(request, values, availableActions, activeAssignment, canQualify);
     }
 
     /**
@@ -457,6 +495,7 @@ public class RequestService {
      * nobody has taken charge yet.
      */
     public record RequestDetailView(Request request, Map<String, String> fieldValues,
-                                     List<WorkflowAction> availableActions, TaskAssignment activeAssignment) {
+                                     List<WorkflowAction> availableActions, TaskAssignment activeAssignment,
+                                     boolean canQualify) {
     }
 }
