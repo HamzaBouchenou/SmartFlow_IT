@@ -56,6 +56,38 @@ describe('ActionBar', () => {
     await user.click(screen.getByRole('button', { name: /clôturer/i }));
     expect(screen.getByLabelText(/motif de clôture/i)).toBeRequired();
   });
+
+  it('§6.4 - le niveau de satisfaction reste facultatif mais est transmis quand renseigné', async () => {
+    const user = userEvent.setup();
+    const onExecute = vi.fn().mockResolvedValue(undefined);
+    render(<ActionBar actions={['CLOSE']} onExecute={onExecute} />);
+
+    await user.click(screen.getByRole('button', { name: /clôturer/i }));
+    expect(screen.getByLabelText(/niveau de satisfaction/i)).not.toBeRequired();
+
+    await user.type(screen.getByLabelText(/motif de clôture/i), 'Résolu');
+    await user.selectOptions(screen.getByLabelText(/niveau de satisfaction/i), '4');
+    await user.click(screen.getByRole('button', { name: /confirmer/i }));
+
+    expect(onExecute).toHaveBeenCalledWith(expect.objectContaining({ action: 'CLOSE', satisfactionRating: 4 }));
+  });
+
+  it("§6.6 - l'affectation automatique masque le champ agent précis et transmet autoAssign", async () => {
+    const user = userEvent.setup();
+    const onExecute = vi.fn().mockResolvedValue(undefined);
+    render(<ActionBar actions={['ASSIGN']} onExecute={onExecute} />);
+
+    await user.click(screen.getByRole('button', { name: /affecter/i }));
+    await user.click(screen.getByLabelText(/affectation automatique/i));
+    expect(screen.queryByLabelText(/identifiant de l'agent/i)).not.toBeInTheDocument();
+
+    await user.type(screen.getByLabelText(/identifiant de l'équipe/i), '7');
+    await user.click(screen.getByRole('button', { name: /confirmer/i }));
+
+    expect(onExecute).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'ASSIGN', assignedTeamId: 7, autoAssign: true, assignedUserId: null }),
+    );
+  });
 });
 
 function actionButtonName(action: WorkflowAction): string {

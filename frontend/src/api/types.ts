@@ -137,6 +137,10 @@ export interface RequestDetailResponse {
   submittedAt: string | null;
   fieldValues: Record<string, string>;
   availableActions: WorkflowAction[];
+  // "Qualifier" (§5/RG-07) n'est pas un WorkflowAction (jamais dans availableActions[] ci-
+  // dessus) : canQualify suit exactement le même principe que availableActions - dérivé
+  // d'AuthorizationService.canQualify côté serveur, jamais d'une règle de rôle recopiée ici.
+  canQualify: boolean;
   assignedUserId: number | null;
   assignedUserName: string | null;
   assignedTeamId: number | null;
@@ -145,6 +149,9 @@ export interface RequestDetailResponse {
   slaDueAtFirstResponse: string | null;
   slaDueAtResolution: string | null;
   reopenDeadline: string | null;
+  closureReason: string | null;
+  closureSolution: string | null;
+  satisfactionRating: number | null;
 }
 
 // --- api/dto/response/RequestHistoryResponse (§6.4 - frise d'avancement) -------------
@@ -200,13 +207,36 @@ export interface UpdateRequestRequest {
   fieldValues?: Record<string, string>;
 }
 
+// --- api/dto/request/QualifyRequestRequest (§5/RG-07) --------------------------------
+
+export interface QualifyRequestRequest {
+  priority: Priority;
+}
+
+// --- api/dto/{request,response}/*NotificationPreference* (§6.8) ----------------------
+// `mandatory` vient de MandatoryNotificationRule côté serveur (ADR-12) : l'écran affiche
+// ces types verrouillés sans jamais recopier la liste des types obligatoires ici.
+
+export interface NotificationPreferenceResponse {
+  notificationType: NotificationType;
+  emailEnabled: boolean;
+  mandatory: boolean;
+}
+
+export interface UpdateNotificationPreferenceRequest {
+  emailEnabled: boolean;
+}
+
 export interface ExecuteTransitionRequest {
   action: WorkflowAction;
   comment?: string | null;
   closureReason?: string | null;
   closureSolution?: string | null;
+  satisfactionRating?: number | null;
   assignedUserId?: number | null;
   assignedTeamId?: number | null;
+  /** §6.6 - n'a de sens qu'avec assignedTeamId seul (jamais assignedUserId) : voir ExecuteTransitionRequest.java. */
+  autoAssign?: boolean;
 }
 
 export interface LoginRequest {
@@ -268,9 +298,10 @@ export interface NotificationResponse {
 }
 
 // --- api/dto/response/DashboardResponse (§6.9) ------------------------------------------
-// reopenRatePercent reste toujours 0.0 tant que RG-08 n'a pas de statistique dédiée (voir
-// DashboardResponse.java) ; average*Minutes/slaComplianceRatePercent peuvent être `null`
-// (aucune donnée sur la période) - jamais lus comme un 0 caché.
+// reopenRatePercent (RG-08/ADR-14) est la part des demandes déjà clôturées au moins une
+// fois sur la période qui portent une ligne d'historique REOPEN ; average*Minutes/
+// slaComplianceRatePercent/reopenRatePercent peuvent être `null` (aucune donnée sur la
+// période) - jamais lus comme un 0 caché.
 
 export interface DashboardResponse {
   serviceId: number;
@@ -284,6 +315,87 @@ export interface DashboardResponse {
   averageResolutionMinutes: number | null;
   slaComplianceRatePercent: number | null;
   reopenRatePercent: number | null;
+}
+
+// --- api/dto/response/RequesterHomeResponse / AgentHomeResponse / HomeDashboardResponse
+// (§9.4 écran Accueil / §6.9 "vue demandeur", "vue agent") ------------------------------
+// agent est `null` pour un utilisateur qui ne porte aucun rôle complémentaire (REQUESTER
+// pur, §5) - aucune file de travail à lui montrer.
+
+export interface RequesterRequestItem {
+  id: number;
+  reference: string;
+  title: string;
+  status: RequestStatus;
+  priority: Priority | null;
+  slaStatus: string | null;
+  slaDueAtResolution: string | null;
+}
+
+export interface RequesterDecisionItem {
+  requestId: number;
+  reference: string;
+  action: WorkflowAction;
+  occurredAt: string;
+  comment: string | null;
+}
+
+export interface RequesterHomeResponse {
+  inProgressCount: number;
+  requests: RequesterRequestItem[];
+  recentDecisions: RequesterDecisionItem[];
+}
+
+export interface AgentTaskItem {
+  id: number;
+  reference: string;
+  title: string;
+  priority: Priority | null;
+  slaStatus: string | null;
+  slaDueAtResolution: string | null;
+}
+
+export interface AgentHomeResponse {
+  currentLoad: number;
+  overdue: AgentTaskItem[];
+  highPriority: AgentTaskItem[];
+}
+
+export interface HomeDashboardResponse {
+  requester: RequesterHomeResponse;
+  agent: AgentHomeResponse | null;
+}
+
+// --- api/dto/request/BulkAssignRequest / dto/response/BulkActionResultResponse (§6.6) --
+// ASSIGN est la seule action en masse exposée - voir BulkAssignmentService.java.
+
+export interface BulkAssignRequest {
+  requestIds: number[];
+  assignedUserId?: number | null;
+  assignedTeamId?: number | null;
+  autoAssign?: boolean;
+}
+
+export interface BulkActionResultItem {
+  requestId: number;
+  success: boolean;
+  errorCode: string | null;
+}
+
+export interface BulkActionResultResponse {
+  results: BulkActionResultItem[];
+}
+
+// --- api/dto/request/UpdateProfileRequest / ChangePasswordRequest (§6.1 libre-service) --
+
+export interface UpdateProfileRequest {
+  firstName: string;
+  lastName: string;
+}
+
+export interface ChangePasswordRequest {
+  currentPassword: string;
+  newPassword: string;
 }
 
 // --- api/dto/response/AiAnalysisResponse / dto/request/AnalyzeRequest / ValidateAiAnalysisRequest (§12, RG-10) --

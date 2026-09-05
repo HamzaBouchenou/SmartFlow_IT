@@ -46,7 +46,6 @@ export function MyRequestsPage() {
 
   return (
     <section>
-      <h1>Mes demandes</h1>
 
       <div className="task-filters">
         <select
@@ -70,37 +69,39 @@ export function MyRequestsPage() {
 
       {result && (
         <>
-          <table className="task-table">
-            <thead>
-              <tr>
-                <th>Référence</th>
-                <th>Titre</th>
-                <th>Statut</th>
-                <th>Étape</th>
-                <th>Soumise le</th>
-                <th>SLA</th>
-              </tr>
-            </thead>
-            <tbody>
-              {result.content.map((item) => (
-                <tr key={item.id}>
-                  <td>
-                    <Link to={`/demandes/${item.id}`}>{item.reference}</Link>
-                  </td>
-                  <td>{item.title}</td>
-                  <td>{statusLabel(item.status)}</td>
-                  <td>{item.currentStepName ?? '—'}</td>
-                  <td>{formatDate(item.submittedAt)}</td>
-                  <td>{item.slaStatus ?? '—'}</td>
-                </tr>
-              ))}
-              {result.content.length === 0 && (
+          <div className="table-scroll">
+            <table className="task-table">
+              <thead>
                 <tr>
-                  <td colSpan={6}>Aucune demande pour l'instant.</td>
+                  <th>Référence</th>
+                  <th>Titre</th>
+                  <th>Statut</th>
+                  <th>Étape</th>
+                  <th>Soumise le</th>
+                  <th>SLA</th>
                 </tr>
-              )}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {result.content.map((item) => (
+                  <tr key={item.id}>
+                    <td>
+                      <Link to={`/demandes/${item.id}`}>{item.reference}</Link>
+                    </td>
+                    <td>{item.title}</td>
+                    <td>{statusLabel(item.status)}</td>
+                    <td>{item.currentStepName ?? '—'}</td>
+                    <td>{formatDate(item.submittedAt)}</td>
+                    <td>{item.slaStatus ?? '—'}</td>
+                  </tr>
+                ))}
+                {result.content.length === 0 && (
+                  <tr>
+                    <td colSpan={6}>Aucune demande pour l'instant.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
 
           <div className="pagination">
             <button type="button" disabled={page === 0} onClick={() => setPage((current) => current - 1)}>

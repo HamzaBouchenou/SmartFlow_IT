@@ -15,4 +15,11 @@ public interface RequestHistoryRepository extends JpaRepository<RequestHistory, 
 
     // RG-08/ADR-14 - REOPEN reprend au fromStep de la dernière CLOSE de cette demande.
     Optional<RequestHistory> findFirstByRequestIdAndActionOrderByOccurredAtDesc(Long requestId, WorkflowAction action);
+
+    // §6.9 - "taux de réouverture" : quelles demandes, parmi celles filtrées pour le tableau
+    // de bord, ont au moins une ligne d'historique REOPEN (RG-08/ADR-14).
+    List<RequestHistory> findByRequestIdInAndAction(List<Long> requestIds, WorkflowAction action);
+
+    // §6.9/§9.4 - "vue demandeur" : "dernières décisions" sur les dossiers d'un demandeur.
+    List<RequestHistory> findByRequestIdInAndActionIn(List<Long> requestIds, List<WorkflowAction> actions);
 }

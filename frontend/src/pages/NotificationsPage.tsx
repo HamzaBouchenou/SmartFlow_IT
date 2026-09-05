@@ -57,7 +57,6 @@ export function NotificationsPage() {
 
   return (
     <section>
-      <h1>Notifications</h1>
 
       <ErrorBanner error={error} />
       {loading && <p className="page-loading">Chargement…</p>}

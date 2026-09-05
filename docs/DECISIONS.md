@@ -776,3 +776,199 @@ Il ne verse aucun contrôle de cohérence sémantique du graphe (accessibilité 
 étapes depuis la première, absence d'impasse) au-delà du seul contrôle explicite ci-dessus
 (au moins une `Step`) - une omission plus subtile reste possible et n'est détectée qu'à
 l'usage, comme c'était déjà le cas avant ce lot.
+
+## ADR-18 — Éligibilité d'affectation nommée : étape de destination, et topologie des
+workflows pilotes corrigée en conséquence (§6.6, RG-05/06)
+
+**Statut** : accepté — 02/09/2026
+**Chapitres concernés** : §6.6 (« Affectation manuelle à un agent habilité » et
+« affectation automatique... selon une règle de répartition simple »), §14.1, REC-05
+**Déclencheur** : `docs/CAHIER_DE_RECETTE.md` REC-SCN-10/18/19, exécutés contre la pile
+réelle plutôt qu'en test unitaire - trois échecs qui partagent la même cause.
+
+### Contexte
+
+`WorkflowTransitionService.execute` déplace `currentStep` vers l'étape cible **avant**
+d'appeler `assign()`, qui vérifie ensuite l'éligibilité de la cible nommée
+(`assignedUserId`) en rejouant `canAct` sur cette étape déjà déplacée - jamais sur l'étape
+de départ. `ManualAssignmentControllerIT` documentait déjà ce choix et le testait
+correctement, mais avec une topologie de test choisie exprès pour ne jamais heurter le cas
+où l'étape suivante change de rôle responsable (son propre commentaire : « a manager-only
+next step would make every AGENT target ineligible by construction »). Les deux workflows
+pilotes réels (V5) heurtent exactement ce cas : `ASSIGN` ne part que de QUALIFICATION
+(AGENT), vers VALIDATION (MANAGER) dans le cas général, ou directement vers TRAITEMENT
+(AGENT) pour une demande CRITICAL - et TRAITEMENT lui-même n'a **aucune** arête `ASSIGN`
+sortante, contrairement à `REQUEST_INFO` qui y boucle déjà sur place. Résultat en recette
+réelle : impossible d'affecter nommément ou automatiquement une demande à un agent précis
+tant que la demande n'a pas atteint TRAITEMENT via le raccourci CRITICAL, et impossible de
+la réaffecter à un autre agent une fois arrivée là.
+
+### Décision
+
+**L'éligibilité sur l'étape de destination est confirmée comme le bon comportement, pas un
+bug.** Nommer quelqu'un revient à décider qui héritera de la propriété de l'étape qu'on est
+en train de rejoindre : accepter une cible qui n'a légalement aucune action possible à cette
+étape produirait un dossier sans propriétaire réel, alors même que `canAct` le lui refuserait
+au prochain geste. Documenter ce choix ici referme la question « source ou destination ? »
+laissée ouverte par le commentaire de `ManualAssignmentControllerIT` - c'est la destination,
+délibérément.
+
+**La topologie des deux workflows pilotes est corrigée, pas le moteur.** `V9__pilot_workflow_reassignment.sql`
+ajoute une transition `ASSIGN` en boucle sur TRAITEMENT (steps 3 et 7) dans chacun des deux
+workflows publiés - exactement le même motif que la boucle `REQUEST_INFO` déjà présente sur
+ces mêmes étapes. Cela ferme réellement REC-SCN-10 (réaffectation pendant le traitement) :
+aucune ligne Java n'a changé, uniquement une configuration au sens du §2.1 (« pas de branche
+codée en dur »). `V9` ajoute aussi un second `AGENT` par équipe pilote (Mehdi Ouazzani/Salma
+Rifi) : le jeu de données V5 n'en comptait qu'un par équipe, ce qui rendait
+`AutoAssignmentRule.pickLeastLoaded` invérifiable en recette réelle faute d'un second
+candidat à départager, alors que la règle elle-même est déjà testée seule et exactement
+(`AutoAssignmentRuleTest`).
+
+**REC-SCN-18/19 restent corrigés dans leur énoncé, pas dans le code.** Nommer un agent
+directement depuis QUALIFICATION (avant même une première décision de routage) n'a pas de
+sens dans la topologie de ces deux workflows : l'agent qui qualifie une demande la fait
+avancer lui-même, il ne la redistribue pas à un pair au même stade. La capacité que §6.6
+demande - « affecter nommément à un agent » - reste bien réelle et déjà prouvée par
+`ManualAssignmentControllerIT` ; les deux scénarios sont réécrits pour l'exercer là où elle a
+un sens dans ces workflows précis : REC-SCN-18/19 passent désormais par le raccourci
+CRITICAL (QUALIFICATION → TRAITEMENT direct) ou par la boucle TRAITEMENT ajoutée ci-dessus,
+plutôt que par un hand-off imaginaire à l'intérieur de QUALIFICATION.
+
+### Ce que cet ADR n'autorise pas
+
+Il n'introduit aucune arête `ASSIGN` supplémentaire à QUALIFICATION (pas de boucle sur
+place à ce stade) : rien dans §6.6 n'exige qu'un agent puisse re-répartir un dossier qu'il
+vient tout juste de récupérer, avant même de l'avoir qualifié. Il ne touche pas
+`WorkflowTransitionService.assign` ni l'ordre déplacement-puis-vérification : ce
+comportement reste le point de vérité unique de l'éligibilité d'affectation, pour tout
+workflow présent ou futur, pas seulement les deux pilotes.
+
+## ADR-19 — `canView`/`canAnnotate` doivent survivre à CLOSE pour l'agent individuellement
+affecté (RG-06, généralise ADR-14)
+
+**Statut** : accepté — 02/09/2026
+**Chapitres concernés** : RG-06 (« un demandeur ne voit que ses dossiers, sauf rôle
+complémentaire »), §9.4 (écran détail, commentaires, pièces jointes, IA), ADR-10, ADR-11
+**Déclencheur** : recette réelle (`docker compose up`, pas un test) - après avoir clôturé
+une demande individuellement affectée, l'agent qui venait de la traiter et de la clôturer
+ne pouvait plus la consulter du tout (`GET /requests/{id}` → 404).
+
+### Contexte
+
+`ScopeRule.TEAM` ne compare jamais qu'à deux valeurs : `currentStepTeamId` (l'équipe
+responsable de l'étape courante) et `assignedTeamId` (l'équipe d'une dépose en file,
+`TaskAssignment.assignedTeam`). Une affectation **individuelle** (`assignedUser` posé,
+`assignedTeam` resté `null` - `WorkflowTransitionService.assign`) ne renseigne jamais ce
+second champ. Tant que la demande reste en cours, `currentStepTeamId` suffit. Mais `CLOSE`
+pose `currentStep = null` (ADR-03) : les deux champs deviennent `null` en même temps, et
+`ScopeRule.covers(TEAM, ...)` refuse alors systématiquement l'agent qui vient pourtant de
+clôturer la demande lui-même. ADR-14 avait déjà rencontré et résolu exactement ce problème,
+mais seulement pour `canReopen` (en lui faisant recevoir explicitement l'étape que CLOSE a
+quittée) - `canView` et `canAnnotate`, qui partagent la même résolution de périmètre via la
+surcharge à un argument de `resolveScopeContext`, n'avaient jamais reçu le même correctif.
+
+### Décision
+
+**Généraliser le correctif d'ADR-14 au point de résolution commun.** La surcharge à un
+argument de `resolveScopeContext` (utilisée par `canAct`, `canView`, `canAnnotate`) résout
+désormais elle-même l'étape à retenir pour le périmètre TEAM via `teamScopeStepForReading` :
+l'étape courante si elle existe, sinon - pour une demande `CLOSED` ou `ARCHIVED` - l'étape
+que la dernière transition `CLOSE` a quittée (`RequestHistory.fromStep`), exactement la
+valeur qu'ADR-14 passait déjà explicitement à `canReopen`. Une demande `CANCELLED` n'a pas
+besoin de ce repli : `RequestService.cancel` refuse déjà toute annulation dès qu'une
+`TaskAssignment` existe, donc une demande annulée n'a jamais eu d'affectation individuelle
+dont la visibilité serait à préserver. `canAct` appelle la même surcharge mais n'atteint
+jamais ce repli en pratique : `WorkflowActionAvailabilityRule` refuse déjà toute action dès
+que `currentStep` est `null`, avant même que le périmètre ne soit résolu - seuls `canView`
+et `canAnnotate` changent réellement de comportement.
+
+### Raisons
+
+Un seul point de résolution plutôt que de dupliquer le repli d'ADR-14 dans chaque appelant :
+la surcharge à un argument reste l'unique endroit qui décide « quelle étape compte pour le
+périmètre TEAM d'une lecture », cohérent avec le principe déjà énoncé pour ADR-17/ADR-18
+(« chaque garantie a un seul point de vérité »). Se limiter à `CLOSED`/`ARCHIVED` plutôt que
+d'étendre le repli à tout statut évite de masquer un futur bug similaire sur un statut qui
+n'a structurellement pas besoin de ce filet.
+
+### Ce que cet ADR n'autorise pas
+
+Il ne change rien à `ScopeRule` lui-même (toujours pur, toujours limité à comparer des id
+déjà résolus) ni à la sémantique de `assignedTeamId` (une dépose en file reste distincte
+d'une affectation individuelle). Il ne couvre pas un scénario où l'agent individuellement
+affecté aurait ensuite perdu son `UserRoleAssignment` sur cette équipe entre l'affectation et
+la lecture - un cas hors périmètre de cet ADR, comme il l'était déjà pour ADR-14.
+
+## ADR-20 — Une étape dédiée « en attente de complément » pour que RG-07 puisse réellement
+suspendre le SLA (§6.5/§6.7)
+
+**Statut** : accepté — 03/09/2026
+**Chapitres concernés** : RG-07 (« Le compteur SLA démarre à la soumission et peut être
+suspendu par un statut configuré »), §6.5, §6.7, §2.1, REC-SCN-22
+**Déclencheur** : REC-SCN-22, seul scénario du cahier de recette resté en échec après la
+passe complète : `steps.suspend_sla` valait `false` sur les 8 étapes des deux workflows
+pilotes, donc aucune demande réelle n'a jamais pu suspendre son compteur SLA.
+
+### Contexte
+
+`SlaSuspensionService.onStepEntered` écrit déjà un `SlaEvent` SUSPENDED/RESUMED selon
+`Step.isSuspendSla()`, `SlaSuspensionRule` rejoue ces événements et `SlaCalculator` décale
+l'échéance d'autant : le mécanisme complet existait, testé en isolation, depuis S8. Ce qui
+manquait était plus simple et plus embarrassant : **aucune étape configurée ne portait
+jamais `suspend_sla = true`**. `REQUEST_INFO` ne faisait que reboucler sur l'étape courante
+(`TRAITEMENT -> TRAITEMENT`), donc `onStepEntered` recevait une étape non suspensive et
+n'écrivait rien. RG-07 n'était satisfaite que sur le papier, et REC-SCN-22 était
+inexécutable - pas par un bug de code, mais par une configuration qui n'exerçait jamais la
+règle.
+
+### Décision
+
+**Une étape dédiée plutôt qu'un drapeau sur TRAITEMENT.** `V10__pilot_workflow_info_wait_step.sql`
+ajoute au workflow pilote Support Informatique une étape `EN_ATTENTE_INFO`
+(`suspend_sla = true`), portée par la même équipe AGENT que TRAITEMENT ; la transition
+`REQUEST_INFO` sortant de TRAITEMENT y mène désormais, et une transition `ASSIGN` en revient
+vers TRAITEMENT (« reprendre en charge », que `RolePermissionRule` accorde déjà à l'AGENT).
+Marquer TRAITEMENT lui-même `suspend_sla = true` aurait été une ligne de SQL de moins mais
+aurait suspendu **tout** le temps de traitement actif, pas seulement l'attente du demandeur -
+ce que ni RG-07 ni §6.7 ne demandent, et qui aurait rendu le taux de respect SLA du §6.9
+insignifiant. La redirection remplace la boucle plutôt que de s'y ajouter : deux transitions
+`REQUEST_INFO` sans condition depuis la même étape laisseraient
+`TransitionResolutionRule` sans critère pour choisir.
+
+**Le workflow Achats reste inchangé.** Il n'a jamais porté de `REQUEST_INFO`, et §2.1 attend
+explicitement deux configurations différentes du même moteur : lui ajouter la même étape par
+symétrie effacerait cette différence voulue. Un service qui voudrait la suspension l'obtient
+en publiant une nouvelle version de son workflow depuis l'écran d'administration (ADR-17) -
+c'est précisément ce que la configurabilité du §2.1 doit rendre possible sans toucher au code.
+
+**Une seule étape d'attente, rattachée au traitement.** `REQUEST_INFO` depuis QUALIFICATION
+continue de boucler sur place sans suspendre : une étape d'attente partagée ne peut avoir
+qu'une seule transition de reprise, et la faire revenir tantôt vers QUALIFICATION tantôt vers
+TRAITEMENT demanderait une condition que le moteur ne sait pas exprimer sur l'étape d'origine.
+Suspendre aussi la phase de qualification supposerait une seconde étape d'attente - possible
+plus tard par configuration, hors périmètre de cette correction.
+
+### Pourquoi une migration modifie une version publiée
+
+`ADR-17` rend une `WorkflowDefinition` publiée immuable **pour le service
+d'administration** (`WorkflowAdminService` refuse d'y toucher, quel que soit l'appelant) :
+c'est ce qui garantit RG-03 pour les versions qu'un administrateur publie. `V5` et les
+migrations suivantes, elles, *sont* le mécanisme qui produit le jeu de données de
+démonstration ; corriger une configuration pilote incomplète avant sa mise en service n'est
+pas la même chose qu'un administrateur qui réécrirait un circuit sous les pieds de demandes
+en cours. La conséquence est assumée et vaut d'être dite : appliquée à une base contenant
+déjà des demandes en cours à l'étape TRAITEMENT, cette migration change la cible de leur
+`REQUEST_INFO`. Sur le jeu de démonstration (recette rejouée depuis une base fraîchement
+migrée, cf. l'en-tête du cahier de recette) le cas ne se pose pas. Toute correction
+ultérieure d'un circuit **déjà exploité** doit passer par une nouvelle version publiée, pas
+par une migration.
+
+### Ce que cet ADR n'autorise pas
+
+Il n'introduit aucun nouveau `WorkflowAction` : « reprendre après complément » réutilise
+`ASSIGN`, déjà accordé à l'AGENT, plutôt qu'une action de plus à câbler dans
+`RolePermissionRule`, `WorkflowActionAvailabilityRule` et l'interface. Il ne touche pas
+`SlaSuspensionService`, `SlaSuspensionRule` ni `SlaCalculator` - le correctif est
+entièrement de la configuration, ce qui est exactement ce que §2.1 promet. Il ne suspend
+rien pendant une `RETURN` vers le demandeur (§6.5), qui reste une décision de workflow et
+non une attente d'information.

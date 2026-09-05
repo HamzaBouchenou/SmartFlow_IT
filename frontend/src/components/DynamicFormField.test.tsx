@@ -63,4 +63,19 @@ describe('DynamicFormField', () => {
     render(<DynamicFormField field={field({})} value="" onChange={vi.fn()} error="champ invalide" />);
     expect(screen.getByText('champ invalide')).toBeInTheDocument();
   });
+
+  it('§8 (Accessibilité) - relie le champ à son message d\'erreur via aria-describedby/aria-invalid, pas seulement par la couleur', () => {
+    render(<DynamicFormField field={field({})} value="" onChange={vi.fn()} error="champ invalide" />);
+    const input = screen.getByLabelText(/urgence/i);
+    expect(input).toHaveAttribute('aria-invalid', 'true');
+    expect(input.getAttribute('aria-describedby')).toContain('field-urgency-error');
+    expect(screen.getByText('champ invalide')).toHaveAttribute('id', 'field-urgency-error');
+  });
+
+  it('§8 (Accessibilité) - relie le champ à son texte d\'aide via aria-describedby quand aucune erreur n\'est présente', () => {
+    render(<DynamicFormField field={field({ helpText: 'Précisez le contexte.' })} value="" onChange={vi.fn()} />);
+    const input = screen.getByLabelText(/urgence/i);
+    expect(input).not.toHaveAttribute('aria-invalid');
+    expect(input.getAttribute('aria-describedby')).toBe('field-urgency-help');
+  });
 });

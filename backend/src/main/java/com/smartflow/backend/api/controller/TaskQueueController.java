@@ -1,18 +1,24 @@
 package com.smartflow.backend.api.controller;
 
+import com.smartflow.backend.api.dto.request.BulkAssignRequest;
+import com.smartflow.backend.api.dto.response.BulkActionResultResponse;
 import com.smartflow.backend.api.dto.response.PageResponse;
 import com.smartflow.backend.api.dto.response.RequestSummaryResponse;
 import com.smartflow.backend.api.mapper.RequestMapper;
+import com.smartflow.backend.application.service.BulkAssignmentService;
 import com.smartflow.backend.application.service.TaskQueueFilter;
 import com.smartflow.backend.application.service.TaskQueueService;
 import com.smartflow.backend.crosscutting.security.SmartFlowUserDetails;
 import com.smartflow.backend.domain.enums.Priority;
 import com.smartflow.backend.domain.enums.RequestStatus;
+import jakarta.validation.Valid;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.ModelAttribute;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -30,9 +36,11 @@ import java.time.Instant;
 public class TaskQueueController {
 
     private final TaskQueueService taskQueueService;
+    private final BulkAssignmentService bulkAssignmentService;
 
-    public TaskQueueController(TaskQueueService taskQueueService) {
+    public TaskQueueController(TaskQueueService taskQueueService, BulkAssignmentService bulkAssignmentService) {
         this.taskQueueService = taskQueueService;
+        this.bulkAssignmentService = bulkAssignmentService;
     }
 
     @GetMapping("/mine")
@@ -49,6 +57,14 @@ public class TaskQueueController {
                                                        @PageableDefault(size = 20, sort = "submittedAt") Pageable pageable) {
         var page = taskQueueService.teamTasks(principal.getUser(), filterParams.toFilter(), pageable);
         return PageResponse.from(page.map(RequestMapper::toSummary));
+    }
+
+    /** §6.6 - "Actions en masse limitées aux changements ne présentant pas de risque fonctionnel" : voir BulkAssignmentService. */
+    @PostMapping("/bulk-assign")
+    public BulkActionResultResponse bulkAssign(@AuthenticationPrincipal SmartFlowUserDetails principal,
+                                                @Valid @RequestBody BulkAssignRequest body) {
+        return bulkAssignmentService.bulkAssign(principal.getUser(), body.requestIds(), body.assignedUserId(),
+                body.assignedTeamId(), body.isAutoAssign());
     }
 
     /**

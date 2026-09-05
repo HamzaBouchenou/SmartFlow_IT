@@ -21,4 +21,8 @@ public interface TaskAssignmentRepository extends JpaRepository<TaskAssignment, 
     // §6.9 - "délai moyen de prise en charge" (DashboardService) : toutes les affectations
     // (pas seulement l'active) d'un lot de demandes, pour retenir la première par demande.
     List<TaskAssignment> findByRequestIdIn(List<Long> requestIds);
+
+    // §6.6 - "affectation automatique... règle de répartition simple" : la charge actuelle
+    // d'un agent candidat (AutoAssignmentRule choisit le moins chargé).
+    long countByAssignedUserIdAndActiveTrue(Long assignedUserId);
 }

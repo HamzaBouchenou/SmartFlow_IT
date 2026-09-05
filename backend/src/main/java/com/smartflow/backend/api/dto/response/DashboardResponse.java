@@ -5,11 +5,10 @@ import java.util.Map;
 
 /**
  * §6.9 - "Vue responsable : volumes par statut, catégorie, agent et période" et les quatre
- * indicateurs. reopenRatePercent reste toujours 0.0 - RG-08 (réouverture) n'est pas encore
- * implémentée (docs/DECISIONS.md n'a pas encore tranché sa durée paramétrable) ; le champ
- * existe déjà pour ne pas casser ce contrat une fois RG-08 posée. average*Minutes et
- * slaComplianceRatePercent sont `null` quand aucune donnée n'existe encore pour la période
- * (pas de division par zéro déguisée en 0%).
+ * indicateurs. reopenRatePercent (RG-08/ADR-14) est la part des demandes déjà clôturées au
+ * moins une fois sur la période qui portent une ligne d'historique REOPEN. average*Minutes,
+ * slaComplianceRatePercent et reopenRatePercent sont `null` quand aucune donnée n'existe
+ * encore pour la période (pas de division par zéro déguisée en 0%).
  */
 public record DashboardResponse(
         Long serviceId,

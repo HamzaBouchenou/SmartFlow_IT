@@ -34,6 +34,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.cookie;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -149,6 +150,19 @@ class AuthenticationIT {
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.code", equalTo("UNAUTHENTICATED")))
                 .andExpect(jsonPath("$.traceId").exists());
+    }
+
+    @Test
+    @DisplayName("§13 - every response carries the security headers the CDC's XSS/CSRF line requires, even on the public login route")
+    void everyResponseCarriesSecurityHeaders() throws Exception {
+        mockMvc.perform(get("/api/v1/auth/csrf"))
+                .andExpect(header().string("X-Content-Type-Options", "nosniff"))
+                .andExpect(header().string("X-Frame-Options", "DENY"))
+                .andExpect(header().string("Referrer-Policy", "strict-origin-when-cross-origin"))
+                .andExpect(header().exists("Content-Security-Policy"))
+                .andExpect(header().string("Content-Security-Policy",
+                        org.hamcrest.Matchers.containsString("frame-ancestors 'none'")))
+                .andExpect(header().exists("Permissions-Policy"));
     }
 
     @Test

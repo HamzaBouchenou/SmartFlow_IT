@@ -25,11 +25,12 @@ public final class RequestMapper {
                 request.getStatus().name(), request.getPriority() != null ? request.getPriority().name() : null,
                 request.getTitle(), request.getDescription(),
                 currentStep != null ? currentStep.getId() : null, request.getSubmittedAt(), view.fieldValues(),
-                view.availableActions().stream().map(WorkflowAction::name).toList(),
+                view.availableActions().stream().map(WorkflowAction::name).toList(), view.canQualify(),
                 assignedUser != null ? assignedUser.getId() : null, fullName(assignedUser),
                 assignedTeam != null ? assignedTeam.getId() : null, assignedTeam != null ? assignedTeam.getName() : null,
                 request.getSlaStatus() != null ? request.getSlaStatus().name() : null,
-                request.getSlaDueAtFirstResponse(), request.getSlaDueAtResolution(), request.getReopenDeadline());
+                request.getSlaDueAtFirstResponse(), request.getSlaDueAtResolution(), request.getReopenDeadline(),
+                request.getClosureReason(), request.getClosureSolution(), request.getSatisfactionRating());
     }
 
     /** §6.6 - une ligne de file de travail : voir RequestSummaryResponse pour ce qu'une liste n'a pas besoin de porter. */

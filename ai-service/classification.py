@@ -8,7 +8,6 @@ Both classifiers expose the same interface - classify(title, description) -> Pre
 so the Flask route (app.py) and the evaluation script (evaluate.py) can compare them without
 knowing which one is "the" active strategy.
 """
-import re
 from dataclasses import dataclass
 
 CATEGORIES = ["MATERIEL", "LOGICIEL", "ACCES_COMPTE", "RESEAU", "ACHAT", "AUTRE"]

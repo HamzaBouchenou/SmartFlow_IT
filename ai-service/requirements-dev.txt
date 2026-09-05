@@ -1,2 +1,6 @@
 -r requirements.txt
 pytest==8.3.5
+# §15.2 étape 3 - rapport de qualité de code (ruff) et analyse des dépendances (pip-audit),
+# tous deux invoqués en CI seulement (job dédié, ci.yml), jamais par `pytest` lui-même.
+ruff==0.14.5
+pip-audit==2.9.0

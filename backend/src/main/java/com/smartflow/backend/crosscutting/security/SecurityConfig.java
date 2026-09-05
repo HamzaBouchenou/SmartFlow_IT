@@ -13,6 +13,7 @@ import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfFilter;
 import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
+import org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter;
 
 /**
  * ADR-01 (docs/DECISIONS.md) - session serveur portée par un cookie, CSRF activé. Pas de
@@ -55,6 +56,29 @@ public class SecurityConfig {
                         // produces nor needs (Spring Security reference docs - SPA CSRF pattern).
                         .csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler()))
                 .addFilterAfter(new CsrfCookieFilter(), CsrfFilter.class)
+                // §13 - ligne "XSS / CSRF" : "en-têtes de sécurité" en plus de la stratégie
+                // de cookie d'ADR-01. Posés sur chaque réponse, y compris les routes
+                // publiques (login, csrf) : un en-tête de sécurité protège le navigateur qui
+                // reçoit la réponse, pas seulement les routes qui exigent une session.
+                // HSTS n'est pas reconfiguré ici : le défaut de Spring Security ne l'émet
+                // que sur une connexion déjà sécurisée (request.isSecure()), cohérent avec
+                // SESSION_COOKIE_SECURE - aucun environnement de ce dépôt ne termine encore
+                // TLS (voir application.properties), l'en-tête ne serait donc jamais honoré
+                // par un navigateur avant qu'un environnement TLS n'existe.
+                .headers(headers -> headers
+                        .frameOptions(frameOptions -> frameOptions.deny())
+                        .contentTypeOptions(contentTypeOptions -> {})
+                        .referrerPolicy(referrerPolicy -> referrerPolicy
+                                .policy(ReferrerPolicyHeaderWriter.ReferrerPolicy.STRICT_ORIGIN_WHEN_CROSS_ORIGIN))
+                        .permissionsPolicyHeader(permissionsPolicy -> permissionsPolicy
+                                .policy("geolocation=(), camera=(), microphone=(), payment=()"))
+                        // API JSON pure : aucun script/style n'est censé s'exécuter depuis
+                        // une réponse de ce service. object-src/frame-ancestors bloquent
+                        // l'intégration dans un <object>/<iframe> tiers (clickjacking, en
+                        // plus de X-Frame-Options ci-dessus). swagger-ui (§11.1, dev
+                        // seulement) reste servi par le même serveur donc 'self' suffit.
+                        .contentSecurityPolicy(csp -> csp.policyDirectives(
+                                "default-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'self'")))
                 .authorizeHttpRequests(auth -> auth
                         // §11.2 - la connexion elle-même, et l'amorçage du cookie CSRF
                         // qu'elle requiert (AuthController.csrf) : un visiteur sans session

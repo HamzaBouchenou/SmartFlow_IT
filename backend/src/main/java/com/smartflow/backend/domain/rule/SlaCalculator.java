@@ -24,17 +24,25 @@ public class SlaCalculator {
     }
 
     /**
-     * §6.7 - "dans le délai / à risque / en retard". The at-risk boundary sits at 80% of
-     * the original allowed duration, i.e. 20% of allowedMinutes before the (suspension-
-     * adjusted) due date - a suspension pushes both the due date and the at-risk boundary
-     * out by the same amount, since both are derived from the same computeDueAt result.
+     * §6.7 - "dans le délai / à risque / en retard". The at-risk boundary sits at
+     * warningThresholdPercent of the original allowed duration, i.e. the remaining fraction
+     * of allowedMinutes before the (suspension-adjusted) due date - a suspension pushes both
+     * the due date and the at-risk boundary out by the same amount, since both are derived
+     * from the same computeDueAt result.
+     *
+     * §6.10 lists "seuils d'alerte" among the general parameters an administrator adjusts,
+     * so the threshold is an argument rather than the constant 80% it used to be - this rule
+     * stays pure (it never reads the SystemParameter itself; infrastructure/scheduler
+     * resolves it and passes it in, exactly as it already does for allowedMinutes).
      */
-    public SlaStatus computeStatus(Instant now, Instant start, int allowedMinutes, List<SuspensionPeriod> suspensions) {
+    public SlaStatus computeStatus(Instant now, Instant start, int allowedMinutes, List<SuspensionPeriod> suspensions,
+                                    int warningThresholdPercent) {
         Instant dueAt = computeDueAt(start, allowedMinutes, suspensions);
         if (!now.isBefore(dueAt)) {
             return SlaStatus.OVERDUE;
         }
-        Instant atRiskThreshold = dueAt.minus(Duration.ofMinutes(allowedMinutes).dividedBy(5));
+        long remainingMinutesAtThreshold = Math.round(allowedMinutes * (100 - warningThresholdPercent) / 100.0);
+        Instant atRiskThreshold = dueAt.minus(Duration.ofMinutes(remainingMinutesAtThreshold));
         if (!now.isBefore(atRiskThreshold)) {
             return SlaStatus.AT_RISK;
         }

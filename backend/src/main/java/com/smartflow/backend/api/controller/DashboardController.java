@@ -1,6 +1,7 @@
 package com.smartflow.backend.api.controller;
 
 import com.smartflow.backend.api.dto.response.DashboardResponse;
+import com.smartflow.backend.api.dto.response.HomeDashboardResponse;
 import com.smartflow.backend.application.service.DashboardService;
 import com.smartflow.backend.crosscutting.security.SmartFlowUserDetails;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -24,6 +25,12 @@ public class DashboardController {
 
     public DashboardController(DashboardService dashboardService) {
         this.dashboardService = dashboardService;
+    }
+
+    /** §9.4 (écran Accueil) / §6.9 ("vue demandeur", "vue agent") - résumé borné à l'appelant. */
+    @GetMapping("/home")
+    public HomeDashboardResponse home(@AuthenticationPrincipal SmartFlowUserDetails principal) {
+        return dashboardService.getHome(principal.getUser());
     }
 
     @GetMapping("/service")

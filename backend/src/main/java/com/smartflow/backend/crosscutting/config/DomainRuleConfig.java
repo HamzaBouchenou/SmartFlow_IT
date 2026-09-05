@@ -1,6 +1,7 @@
 package com.smartflow.backend.crosscutting.config;
 
 import com.smartflow.backend.domain.rule.AttachmentValidationRule;
+import com.smartflow.backend.domain.rule.AutoAssignmentRule;
 import com.smartflow.backend.domain.rule.CommentRequirementRule;
 import com.smartflow.backend.domain.rule.FormValidationRule;
 import com.smartflow.backend.domain.rule.MandatoryNotificationRule;
@@ -81,5 +82,10 @@ public class DomainRuleConfig {
     @Bean
     public SlaThresholdTransitionRule slaThresholdTransitionRule() {
         return new SlaThresholdTransitionRule();
+    }
+
+    @Bean
+    public AutoAssignmentRule autoAssignmentRule() {
+        return new AutoAssignmentRule();
     }
 }

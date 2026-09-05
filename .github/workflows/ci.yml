@@ -1,14 +1,19 @@
 # CI - ancrage §9.2 (GitHub Actions imposé par la pile technique) et §15.2 (pipeline
-# minimal). Ce fichier couvre les étapes 1-2 du pipeline minimal - vérification du format
-# et compilation, exécution des tests unitaires et d'intégration - pour les trois
-# composants du dépôt. Il ne couvre pas encore :
-#   - l'étape 3 (analyse des dépendances / qualité de code) : aucun outil n'est choisi ;
-#   - l'étape 4 (construction des images Docker taguées depuis Git) : les trois Dockerfile
-#     existent (backend, frontend, ai-service) mais aucune image n'est encore poussée vers
-#     un registre ni taguée depuis Git par ce workflow ;
-#   - les étapes 5-6 (déploiement, secrets) : hors périmètre de l'intégration continue,
-#     et un déploiement automatisé n'est de toute façon prévu par §15.2 qu'"après
-#     stabilisation".
+# minimal). État de couverture des six étapes de §15.2 :
+#   1. Vérification du format et compilation (backend/frontend/ai-service)      -> fait
+#   2. Tests unitaires et d'intégration (backend/frontend/ai-service)           -> fait
+#   3. Analyse des dépendances et rapport de qualité de code                    -> fait
+#      (dependency-review sur les PR ; dependency-audit informatif sur push ;
+#      SpotBugs pour le back-end, ruff pour le service IA, npm audit pour le front)
+#   4. Construction des images Docker taguées depuis Git                        -> pas fait
+#      (les trois Dockerfile existent, mais aucune image n'est encore poussée
+#      vers un registre ni taguée depuis Git par ce workflow)
+#   5-6. Déploiement manuel contrôlé, secrets du pipeline/cloud                 -> hors CI
+#      (§15.2 ne prévoit une automatisation qu'"après stabilisation")
+# §14 (Stratégie de tests) - api-tests (Postman/Newman) et security-scan (OWASP ZAP en
+# contrôle de base) tournent contre la pile réelle (`docker compose`), pas contre des mocks -
+# c'est le seul endroit du pipeline qui exerce les trois composants ensemble, à travers le
+# même reverse proxy qu'un navigateur verrait (ADR-01).
 # §15.1 - "Intégration : validation automatique des builds et tests" est l'environnement
 # que ce workflow sert.
 
@@ -19,6 +24,13 @@ on:
     branches: [main, dev]
   pull_request:
     branches: [main, dev]
+
+# CI seulement : mot de passe Postgres jetable pour une base qui n'existe que le temps du
+# job, jamais un secret réel (§8 - "jamais de secret dans le code" reste respecté : rien
+# ici ne protège une donnée, un déploiement réel lit DB_PASSWORD depuis les secrets du
+# pipeline/cloud comme docker-compose.yml l'exige déjà par ${DB_PASSWORD:?...}).
+env:
+  DB_PASSWORD: ci-only-ephemeral-password
 
 jobs:
   backend:
@@ -51,6 +63,31 @@ jobs:
           name: backend-test-reports
           path: backend/target/surefire-reports/**
 
+      # §15.2 étape 3 - rapport de qualité de code. Jamais liée à `mvn verify` (pom.xml -
+      # aucune <executions>) : un rapport, jamais une porte bloquante sur un code déjà vert.
+      # spotbugs-exclude.xml retire EI_EXPOSE_REP/REP2 (bruit systématique de l'injection de
+      # constructeur Spring et des getters JPA, pas une vraie fuite de représentation).
+      - name: Code quality report (SpotBugs)
+        if: always()
+        run: ./mvnw -B -q com.github.spotbugs:spotbugs-maven-plugin:4.9.3.2:spotbugs
+
+      - name: Publish SpotBugs report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-spotbugs-report
+          path: backend/target/spotbugsXml.xml
+          if-no-files-found: ignore
+
+      # §15.2 étape 3 (analyse des dépendances) - fait apparaître les dépendances Maven dans
+      # le graphe de dépendances GitHub du dépôt, pour que dependency-review-action
+      # (job dependency-review ci-dessous) les couvre aussi, pas seulement npm/pip.
+      - name: Submit Maven dependency graph
+        if: github.event_name == 'push'
+        uses: advanced-security/maven-dependency-submission-action@v5.0.0
+        with:
+          directory: backend
+
   frontend:
     name: Frontend (React / TypeScript)
     runs-on: ubuntu-latest
@@ -82,6 +119,13 @@ jobs:
       - name: Type-check and build
         run: npm run build
 
+      # §15.2 étape 3 - analyse des dépendances, rapport seulement (`|| true` : une
+      # vulnérabilité connue chez un tiers ne doit pas bloquer le pipeline sans triage
+      # humain, exactement comme SpotBugs pour le back-end).
+      - name: Dependency audit report (npm audit)
+        if: always()
+        run: npm audit || true
+
   ai-service:
     name: AI service (Flask)
     runs-on: ubuntu-latest
@@ -106,3 +150,89 @@ jobs:
       # cette étape au lot S9.
       - name: Test
         run: python -m pytest -q
+
+      # §15.2 étape 3 - rapport de qualité de code pour le service IA.
+      - name: Code quality report (ruff)
+        if: always()
+        run: ruff check .
+
+      # §15.2 étape 3 - analyse des dépendances, rapport seulement (voir npm audit ci-dessus
+      # pour la même justification du `|| true`).
+      - name: Dependency audit report (pip-audit)
+        if: always()
+        run: pip-audit || true
+
+  # §14 - "Tests API : scénarios nominaux, erreurs, droits et pagination" (Postman/Newman).
+  # Contre la pile réelle assemblée par docker-compose.yml, à travers le reverse proxy du
+  # front (même origine qu'un navigateur, ADR-01) - jamais directement sur le port
+  # back-end. Complémentaire de docs/CAHIER_DE_RECETTE.md (exécution manuelle par rôle) :
+  # cette collection est la partie rejouable automatiquement à chaque push. Voir
+  # postman/README.md pour le piège CSRF déjà rencontré en construisant cette collection.
+  api-tests:
+    name: API tests (Postman/Newman)
+    runs-on: ubuntu-latest
+    needs: [backend, frontend, ai-service]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start the real stack (docker compose)
+        run: docker compose up -d --build --wait --wait-timeout 180
+
+      - name: Run the Postman collection
+        run: |
+          npx --yes newman run postman/SmartFlow.postman_collection.json \
+            -e postman/SmartFlow.postman_environment.json \
+            --reporters cli,junit --reporter-junit-export newman-report.xml
+
+      - name: Publish Newman report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: newman-report
+          path: newman-report.xml
+          if-no-files-found: ignore
+
+      - name: Dump container logs on failure
+        if: failure()
+        run: docker compose logs
+
+      - name: Stop the stack
+        if: always()
+        run: docker compose down -v
+
+  # §14 - "Tests de sécurité : accès horizontal/vertical, fichiers, entrées invalides et
+  # dépendances - OWASP ZAP en contrôle de base." Un rapport, pas une porte bloquante
+  # (fail_action: false) : le périmètre PFA demande un contrôle de base, pas un audit de
+  # sécurité complet avec triage de chaque alerte avant de pouvoir merger.
+  security-scan:
+    name: Security scan (OWASP ZAP baseline)
+    runs-on: ubuntu-latest
+    needs: [backend, frontend, ai-service]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start the real stack (docker compose)
+        run: docker compose up -d --build --wait --wait-timeout 180
+
+      - name: ZAP baseline scan
+        uses: zaproxy/action-baseline@v0.15.0
+        with:
+          target: "http://localhost:5173"
+          fail_action: false
+          allow_issue_writing: false
+          artifact_name: zap-baseline-report
+
+      - name: Stop the stack
+        if: always()
+        run: docker compose down -v
+
+  # §15.2 étape 3 (analyse des dépendances) - ne tourne que sur les PR (la seule situation
+  # où "avant/après" a un sens à comparer) ; couvre npm, pip et Maven ensemble (ce dernier
+  # via le graphe soumis par le job backend ci-dessus, sur push uniquement).
+  dependency-review:
+    name: Dependency review
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/dependency-review-action@v5.0.0

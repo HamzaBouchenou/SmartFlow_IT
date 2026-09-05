@@ -2,6 +2,7 @@ package com.smartflow.backend.api.controller;
 
 import com.smartflow.backend.api.dto.request.CreateRequestRequest;
 import com.smartflow.backend.api.dto.request.ExecuteTransitionRequest;
+import com.smartflow.backend.api.dto.request.QualifyRequestRequest;
 import com.smartflow.backend.api.dto.request.UpdateRequestRequest;
 import com.smartflow.backend.api.dto.response.PageResponse;
 import com.smartflow.backend.api.dto.response.RequestDetailResponse;
@@ -110,6 +111,18 @@ public class RequestController {
     }
 
     /**
+     * §5/RG-07 - "qualifier" : pose la Priority. Jamais résolue via /transitions, comme
+     * REOPEN ci-dessus : ce n'est pas un WorkflowAction (RequestService.qualify's own
+     * javadoc), donc canQualify - pas availableActions[] - gouverne le bouton côté front.
+     */
+    @PostMapping("/{id}/qualify")
+    public RequestDetailResponse qualify(@AuthenticationPrincipal SmartFlowUserDetails principal, @PathVariable Long id,
+                                          @Valid @RequestBody QualifyRequestRequest body) {
+        Request request = requestService.qualify(principal.getUser(), id, body.priority());
+        return RequestMapper.toResponse(requestService.toDetailView(principal.getUser(), request));
+    }
+
+    /**
      * §6.5 - valider, rejeter, retourner, affecter, demander un complément ou clôturer. Ne
      * relit pas via getDetail (RG-06 "son propre dossier" ne s'applique pas ici : l'acteur
      * n'est typiquement pas le demandeur) - WorkflowTransitionService.execute a déjà
@@ -120,7 +133,8 @@ public class RequestController {
     public RequestDetailResponse executeTransition(@AuthenticationPrincipal SmartFlowUserDetails principal,
                                                      @PathVariable Long id, @Valid @RequestBody ExecuteTransitionRequest body) {
         Request request = workflowTransitionService.execute(principal.getUser(), id, body.action(), body.comment(),
-                body.closureReason(), body.closureSolution(), body.assignedUserId(), body.assignedTeamId());
+                body.closureReason(), body.closureSolution(), body.satisfactionRating(),
+                body.assignedUserId(), body.assignedTeamId(), body.isAutoAssign());
         return RequestMapper.toResponse(requestService.toDetailView(principal.getUser(), request));
     }
 

@@ -6,7 +6,6 @@ composées par gabarit, en français, dans le vocabulaire d'un support IT/achats
 Sortie : data/training_data.csv (title,description,category,priority).
 """
 import csv
-import itertools
 import random
 from pathlib import Path
 

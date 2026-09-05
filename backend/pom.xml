@@ -137,6 +137,23 @@
 					</execution>
 				</executions>
 			</plugin>
+			<!-- §15.2 étape 3 - "rapport de qualité de code" pour le back-end. Aucune
+			     <executions> liée : ne s'exécute jamais pendant `./mvnw verify` (qui reste
+			     le geste quotidien documenté dans CLAUDE.md, inchangé en durée), seulement
+			     sur invocation explicite (`mvn com.github.spotbugs:spotbugs-maven-plugin:
+			     spotbugs`, job dédié dans ci.yml) - un rapport, jamais une porte bloquante
+			     sur un code déjà vert. -->
+			<plugin>
+				<groupId>com.github.spotbugs</groupId>
+				<artifactId>spotbugs-maven-plugin</artifactId>
+				<version>4.9.3.2</version>
+				<configuration>
+					<effort>Default</effort>
+					<threshold>Medium</threshold>
+					<xmlOutput>true</xmlOutput>
+					<excludeFilterFile>spotbugs-exclude.xml</excludeFilterFile>
+				</configuration>
+			</plugin>
 		</plugins>
 	</build>
 

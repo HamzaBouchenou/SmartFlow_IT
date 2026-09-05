@@ -151,6 +151,27 @@ class DashboardControllerIT {
     }
 
     @Test
+    @DisplayName("§6.9 - taux de réouverture : demandes rouvertes / demandes déjà clôturées, sur la période")
+    void reopenRateCountsReopenedAmongEverClosed() throws Exception {
+        Long stillClosedId = createDraft("Clavier cassé");
+        mockMvc.perform(post("/api/v1/requests/{id}/submit", stillClosedId).with(user(asRequester)).with(csrf()))
+                .andExpect(status().isOk());
+        closeRequest(stillClosedId);
+
+        Long reopenedId = createDraft("Écran cassé");
+        mockMvc.perform(post("/api/v1/requests/{id}/submit", reopenedId).with(user(asRequester)).with(csrf()))
+                .andExpect(status().isOk());
+        closeRequest(reopenedId);
+        mockMvc.perform(post("/api/v1/requests/{id}/reopen", reopenedId).with(user(asRequester)).with(csrf()))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/v1/dashboards/service").param("serviceId", serviceCatalog.getId().toString()).with(user(asServiceManager)))
+                .andExpect(status().isOk())
+                // 1 sur 2 demandes déjà clôturées a été rouverte - jamais 0.0 codé en dur (ADR-14 est livré).
+                .andExpect(jsonPath("$.reopenRatePercent").value(50.0));
+    }
+
+    @Test
     @DisplayName("§6.9 - CSV export contains one data row per matching request, excluding drafts")
     void csvExportContainsMatchingRequests() throws Exception {
         submitAndClose("Écran cassé");
@@ -172,6 +193,10 @@ class DashboardControllerIT {
         Long id = createDraft(justification);
         mockMvc.perform(post("/api/v1/requests/{id}/submit", id).with(user(asRequester)).with(csrf()))
                 .andExpect(status().isOk());
+        closeRequest(id);
+    }
+
+    private void closeRequest(Long id) throws Exception {
         String closeBody = objectMapper.writeValueAsString(Map.of("action", "CLOSE", "closureReason", "Résolu"));
         mockMvc.perform(post("/api/v1/requests/{id}/transitions", id).with(user(asServiceManager)).with(csrf())
                         .contentType("application/json").content(closeBody))
