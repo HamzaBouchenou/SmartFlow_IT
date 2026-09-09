@@ -76,9 +76,30 @@ public class NotificationService {
         }
     }
 
+    /**
+     * §6.8 - "avec statut lu/non lu" : le centre affiche les deux onglets, donc le filtre
+     * appartient au serveur. Le faire côté écran sur une page déjà paginée donnerait un
+     * compteur faux dès la deuxième page.
+     */
     @Transactional(readOnly = true)
-    public Page<Notification> list(User actingUser, Pageable pageable) {
+    public Page<Notification> list(User actingUser, Pageable pageable, boolean unreadOnly) {
+        if (unreadOnly) {
+            return notificationRepository.findByRecipientIdAndReadAtIsNullOrderByCreatedAtDesc(actingUser.getId(), pageable);
+        }
         return notificationRepository.findByRecipientIdOrderByCreatedAtDesc(actingUser.getId(), pageable);
+    }
+
+    /**
+     * §6.8 - "tout marquer comme lu", en une écriture plutôt qu'un appel par ligne : borné
+     * aux notifications de l'appelant par la requête elle-même (RG-06), donc sans garde
+     * d'autorisation à oublier. Retourne le nombre réellement marqué.
+     */
+    @Transactional
+    public int markAllRead(User actingUser) {
+        var unread = notificationRepository.findByRecipientIdAndReadAtIsNull(actingUser.getId());
+        unread.forEach(notification -> notification.setReadAt(clock.instant()));
+        notificationRepository.saveAll(unread);
+        return unread.size();
     }
 
     @Transactional(readOnly = true)

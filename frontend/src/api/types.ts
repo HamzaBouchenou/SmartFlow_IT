@@ -386,6 +386,33 @@ export interface BulkActionResultResponse {
   results: BulkActionResultItem[];
 }
 
+// --- api/dto/response/MyProfileResponse / RoleAssignmentResponse (§6.1 libre-service) ---
+// Ce que le titulaire d'un compte a le droit de lire du sien - distinct d'`UserResponse`,
+// qui est ce qu'un FUNCTIONAL_ADMIN voit d'un tiers (§6.10). `sessionExpiresAt` est
+// l'instant réel d'expiration tenu par le conteneur (§6.1), jamais recalculé côté client ;
+// nul si la session n'expire pas. `scopeLabel` est nul pour OWN et GLOBAL, qui ne désignent
+// aucun objet.
+
+export interface RoleAssignmentResponse {
+  role: string;
+  scopeType: string;
+  scopeLabel: string | null;
+}
+
+export interface MyProfileResponse {
+  id: number;
+  firstName: string;
+  lastName: string;
+  email: string;
+  active: boolean;
+  departmentId: number | null;
+  departmentName: string | null;
+  directionName: string | null;
+  managerName: string | null;
+  roles: RoleAssignmentResponse[];
+  sessionExpiresAt: string | null;
+}
+
 // --- api/dto/request/UpdateProfileRequest / ChangePasswordRequest (§6.1 libre-service) --
 
 export interface UpdateProfileRequest {

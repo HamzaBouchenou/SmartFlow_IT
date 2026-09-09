@@ -60,7 +60,8 @@ public class AiClient {
         }
     }
 
-    /** §12.1 - catégorie + priorité suggérées ; ADR-16 (EVALUATION.md) - MlClassifier côté Flask. */
+    /** §12.1 - catégorie + priorité suggérées ; ADR-16 puis ADR-21 (EVALUATION.md) - côté
+     * Flask, la catégorie vient du MlClassifier et la priorité du RuleBasedClassifier. */
     public ClassificationResult classify(String title, String description) {
         requireEnabled();
         ClassifyApiResponse response = call(() -> restClient.post().uri("/classify")
@@ -105,8 +106,17 @@ public class AiClient {
                                         double priorityConfidence) {
     }
 
+    /**
+     * ADR-21 - `method` dit quelle stratégie a répondu ("hybrid"), `categoryMethod` et
+     * `priorityMethod` d'où vient chacune des deux suggestions prises séparément : depuis
+     * que les deux cibles n'ont plus la même source côté Flask, un seul mot ne suffit plus.
+     * Ces trois champs sont déclarés pour que ce client décrive fidèlement le corps qu'il
+     * reçoit ; ils ne sont pas encore stockés sur AiAnalysis, ce qui demanderait une
+     * migration et une passe à part.
+     */
     private record ClassifyApiResponse(String category, double categoryConfidence, String priority,
-                                        double priorityConfidence, String method) {
+                                        double priorityConfidence, String method, String categoryMethod,
+                                        String priorityMethod) {
     }
 
     private record SummarizeApiResponse(String summary, String method) {

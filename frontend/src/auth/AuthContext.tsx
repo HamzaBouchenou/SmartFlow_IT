@@ -12,6 +12,9 @@ interface AuthContextValue {
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  /** Relit GET /auth/me : appelé après une mise à jour de profil (§6.1), pour que l'identité
+   * affichée dans l'ossature suive le changement sans recharger la page. */
+  refresh: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -38,12 +41,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(logged);
   }, []);
 
+  const refresh = useCallback(async () => {
+    setUser(await authApi.me());
+  }, []);
+
   const logout = useCallback(async () => {
     await authApi.logout();
     setUser(null);
   }, []);
 
-  const value = useMemo(() => ({ user, loading, login, logout }), [user, loading, login, logout]);
+  const value = useMemo(
+    () => ({ user, loading, login, logout, refresh }),
+    [user, loading, login, logout, refresh],
+  );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

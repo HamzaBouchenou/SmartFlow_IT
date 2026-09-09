@@ -218,6 +218,60 @@ class NotificationControllerIT {
     }
 
     @Test
+    @DisplayName("§6.8 - ?unread=true ne renvoie que les non lues, l'onglet complet les garde toutes")
+    void unreadFilterReturnsOnlyUnreadNotifications() throws Exception {
+        Long id = createDraft();
+        mockMvc.perform(post("/api/v1/requests/{id}/submit", id).with(user(asRequester)).with(csrf()))
+                .andExpect(status().isOk());
+        transition(id, asAgent, "ASSIGN", null, manager.getId()).andExpect(status().isOk());
+        transition(id, asManager, "VALIDATE", "OK", null).andExpect(status().isOk());
+
+        // Le demandeur a deux notifications (SUBMISSION, DECISION) ; une seule est marquée lue.
+        MvcResult list = mockMvc.perform(get("/api/v1/notifications").with(user(asRequester)))
+                .andExpect(jsonPath("$.totalElements").value(2))
+                .andReturn();
+        long firstId = objectMapper.readTree(list.getResponse().getContentAsString())
+                .get("content").get(0).get("id").asLong();
+        mockMvc.perform(post("/api/v1/notifications/{id}/read", firstId).with(user(asRequester)).with(csrf()))
+                .andExpect(status().isNoContent());
+
+        mockMvc.perform(get("/api/v1/notifications").param("unread", "true").with(user(asRequester)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.content[0].readAt").doesNotExist());
+
+        mockMvc.perform(get("/api/v1/notifications").with(user(asRequester)))
+                .andExpect(jsonPath("$.totalElements").value(2));
+    }
+
+    @Test
+    @DisplayName("§6.8 - \"tout marquer comme lu\" vide le compteur de l'appelant, jamais celui d'un autre")
+    void markAllReadOnlyAffectsTheCaller() throws Exception {
+        Long id = createDraft();
+        mockMvc.perform(post("/api/v1/requests/{id}/submit", id).with(user(asRequester)).with(csrf()))
+                .andExpect(status().isOk());
+        transition(id, asAgent, "ASSIGN", null, manager.getId()).andExpect(status().isOk());
+        transition(id, asManager, "VALIDATE", "OK", null).andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/v1/notifications/read-all").with(user(asRequester)).with(csrf()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.marked").value(2));
+
+        mockMvc.perform(get("/api/v1/notifications/unread-count").with(user(asRequester)))
+                .andExpect(jsonPath("$.count").value(0));
+        mockMvc.perform(get("/api/v1/notifications").param("unread", "true").with(user(asRequester)))
+                .andExpect(jsonPath("$.totalElements").value(0));
+
+        // RG-06 - la notification d'affectation du responsable n'a pas été touchée.
+        mockMvc.perform(get("/api/v1/notifications/unread-count").with(user(asManager)))
+                .andExpect(jsonPath("$.count").value(1));
+
+        // Rejouer l'action ne marque plus rien : elle ne porte que sur ce qui reste non lu.
+        mockMvc.perform(post("/api/v1/notifications/read-all").with(user(asRequester)).with(csrf()))
+                .andExpect(jsonPath("$.marked").value(0));
+    }
+
+    @Test
     @DisplayName("§6.6/RG-06 - marking someone else's notification read is refused (404, not 403)")
     void markReadRefusedForSomeoneElsesNotification() throws Exception {
         Long id = createDraft();
