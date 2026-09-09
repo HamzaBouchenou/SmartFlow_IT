@@ -12,6 +12,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
@@ -29,15 +30,24 @@ public class NotificationController {
         this.notificationService = notificationService;
     }
 
+    /** §6.8 - `unread=true` restreint à l'onglet "Non lues" ; sans paramètre, tout l'historique. */
     @GetMapping
     public PageResponse<NotificationResponse> list(@AuthenticationPrincipal SmartFlowUserDetails principal,
+                                                     @RequestParam(defaultValue = "false") boolean unread,
                                                      @PageableDefault(size = 20, sort = "createdAt") Pageable pageable) {
-        return PageResponse.from(notificationService.list(principal.getUser(), pageable).map(NotificationMapper::toResponse));
+        return PageResponse.from(notificationService.list(principal.getUser(), pageable, unread)
+                .map(NotificationMapper::toResponse));
     }
 
     @GetMapping("/unread-count")
     public Map<String, Long> unreadCount(@AuthenticationPrincipal SmartFlowUserDetails principal) {
         return Map.of("count", notificationService.unreadCount(principal.getUser()));
+    }
+
+    /** §6.8 - "tout marquer comme lu" : le nombre de lignes effectivement marquées. */
+    @PostMapping("/read-all")
+    public Map<String, Integer> markAllRead(@AuthenticationPrincipal SmartFlowUserDetails principal) {
+        return Map.of("marked", notificationService.markAllRead(principal.getUser()));
     }
 
     @PostMapping("/{id}/read")

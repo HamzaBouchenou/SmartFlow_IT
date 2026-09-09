@@ -972,3 +972,200 @@ Il n'introduit aucun nouveau `WorkflowAction` : « reprendre après complément 
 entièrement de la configuration, ce qui est exactement ce que §2.1 promet. Il ne suspend
 rien pendant une `RETURN` vers le demandeur (§6.5), qui reste une décision de workflow et
 non une attente d'information.
+
+---
+
+## ADR-21 — La priorité suggérée revient aux règles ; l'évaluation change de protocole
+
+**Statut** : **accepté — 08/09/2026 — appliqué.** (Proposé le 06/09/2026 ; l'acceptation
+était requise parce que cet ADR révise une décision déjà consignée, ADR-16, et déjà
+présentée comme le résultat du §12.2.) `HybridClassifier` est désormais la stratégie que
+`app.py` assemble et sert.
+
+> **Note d'application (08/09/2026).** Confier la priorité aux règles a immédiatement fait
+> apparaître que `RuleBasedClassifier` lisait une urgence **niée** comme une urgence
+> (« ce n'est pas urgent » → `HIGH`, « ce n'est pas bloquant » → `CRITICAL`) : les mots-clés
+> se contiennent les uns les autres, et rien ne regardait la négation. Corrigé dans le même
+> lot (le mot-clé le plus long l'emporte à égalité ; une occurrence niée dans sa propre
+> proposition ne compte plus ; la négation ne s'applique qu'à l'urgence, jamais à la
+> catégorie). Les chiffres cités plus bas sont donc **antérieurs** aux correctifs et
+> légèrement pessimistes pour les règles. Re-mesurée, la priorité par règles passe de
+> 73,7/99,4/73,7 % à 99,4/99,4/74,4 % sur les trois plis de 2b, de 79-83 % à 89-92 % sur 2a,
+> et de 81 % à 89 % sur le protocole 1 ; leur catégorie gagne au passage 3 points (82 → 85 %
+> sur le protocole 1), le départage par mot-clé le plus long servant les deux cibles. La
+> direction de la décision est inchangée ; l'écart se creuse.
+> `EVALUATION.md` porte les chiffres à jour et le détail des deux correctifs.
+**Chapitres concernés** : §12.1 (« proposer une catégorie et une priorité »), §12.2
+(« comparer une approche par règles à un modèle simple… **justifier le choix final par les
+résultats** »), §12.3 (critères d'évaluation), RG-10
+
+### Contexte
+
+ADR-16 a retenu `MlClassifier` (TF-IDF + régression logistique) contre
+`RuleBasedClassifier`, sur la foi d'une mesure unique : 100 % contre 82 %/81 % d'exactitude
+sur un découpage 80/20 du jeu de données généré.
+
+Ce découpage était fait **par ligne**. Or `data/generate_dataset.py` ne compose que 39
+sujets × 12 phrases d'urgence figées : un découpage par ligne place donc les mêmes gabarits
+des deux côtés, et note le modèle sur des phrases dont il a déjà vu des exemplaires mot
+pour mot. La mesure était juste ; la question qu'elle posait n'était pas celle du §12.2.
+
+Refaite avec un découpage **par groupe** — des gabarits entiers retirés de l'entraînement
+(`evaluate.py --grouped`, chiffres complets dans `ai-service/EVALUATION.md`) :
+
+| | Catégorie | Priorité |
+|---|---|---|
+| Split par ligne (ADR-16) | ML 100 % / Règles 82 % | ML 100 % / Règles 81 % |
+| Sujet inédit | ML 37-69 % / **Règles 60-90 %** | — |
+| Formulation d'urgence inédite | — | **ML 0-3 %** / Règles 74-99 % |
+
+La priorité n'est pas « moins bonne » : à 0-3 % sur quatre classes, elle est très en-dessous
+du hasard, signature d'une mémorisation pure. Le fait était visible autrement : la priorité
+d'une ligne du jeu de données est portée **uniquement** par sa dernière phrase, prise dans
+une liste de douze. Un modèle entraîné là-dessus n'a jamais eu la notion d'urgence à
+apprendre — seulement douze phrases à retenir. Six demandes rédigées à la main dans du
+vocabulaire métier réel le confirment en fonctionnement : 4 catégories correctes sur 6,
+**1 priorité sur 6**.
+
+### Décision
+
+**1. Le protocole d'évaluation par groupe devient le protocole de référence** (appliqué).
+`evaluate.py` produit désormais les deux, et `EVALUATION.md` rapporte les deux en disant
+lequel décrit le comportement en service. Toute comparaison future d'approches sur ce jeu
+de données se juge sur le protocole par groupe : sur un jeu composé par gabarit, un
+découpage par ligne ne peut mesurer que de la mémorisation.
+
+**2. La priorité suggérée passe à `RuleBasedClassifier`, la catégorie reste à
+`MlClassifier`** (appliqué - `HybridClassifier`). Mesuré sur les mêmes plis, cet hybride donne catégorie 100 % /
+priorité 74-99 % là où le tout-ML donne catégorie 100 % / priorité 0-3 %. Les deux
+classifieurs existent déjà, exposent la même interface et sont testés : la bascule est un
+changement d'assemblage dans `app.py`, pas un nouveau modèle. La réponse continue de porter
+`method`, qui devient alors la mention des deux approches plutôt que du seul `"ml"` — un
+consommateur doit pouvoir savoir d'où vient chaque suggestion.
+
+**3. Le seuil de confiance reste non filtrant.** Sur formulation inédite, les confiances
+observées tombent à 0,23-0,47 contre 0,59-0,89 sur formulation connue : le signal existe et
+serait exploitable. Ne rien en faire *pour l'instant* est délibéré — RG-10 fait déjà de
+toute suggestion une proposition qu'un humain valide, et masquer les suggestions peu sûres
+supprimerait précisément les cas dont on a besoin pour mesurer le « taux d'acceptation/
+correction » du §12.3. À reconsidérer une fois cette mesure disponible.
+
+### Raisons
+
+**Pourquoi ne pas simplement enrichir le jeu de données.** Ajouter des phrases d'urgence
+repousse le problème sans le changer de nature : avec 40 formulations au lieu de 12, le
+modèle mémorise 40 formulations. Le déséquilibre est structurel — la priorité est portée
+par un vocabulaire fermé, court et répétitif, là où la catégorie est portée par un
+vocabulaire ouvert et thématique. C'est exactement la frontière que §12.2 demande de tracer
+entre les deux approches, et la tracer *par cible* plutôt que globalement est une réponse
+plus fidèle à la question posée qu'un vainqueur unique.
+
+**Pourquoi ne pas abandonner le ML.** Sur la catégorie, dès que le sujet a déjà été vu, le
+ML est à 100 % contre 82 % pour les règles, et il résout la confusion `RESEAU` /
+`ACCES_COMPTE` que la liste de mots-clés ne peut pas trancher (les deux partagent
+« connexion », « accès », « vpn »). Le vocabulaire d'un catalogue de services est fini et
+connu à l'avance : c'est un terrain où l'apprentissage garde un avantage réel.
+
+**Pourquoi corriger `EVALUATION.md` plutôt que le compléter.** §12.2 ne demande pas une
+comparaison, il demande une comparaison **qui justifie le choix final**. Laisser en tête du
+document un tableau dont la conclusion est renversée trois sections plus bas serait la
+seule partie que la plupart des lecteurs retiendraient.
+
+### Ce que cet ADR n'autorise pas
+
+Il ne touche pas à RG-10 : `AiAnalysisService` continue de n'écrire que sur `AiAnalysis`,
+jamais sur `Request`, et `RequestService.qualify` reste le seul chemin par lequel une
+priorité atteint une demande — un geste humain explicite. Changer de classifieur ne change
+donc rien à ce qu'un utilisateur subit sans l'avoir accepté.
+
+Il n'introduit ni modèle téléchargé, ni appel à un service externe (§12.2 — « aucune donnée
+réelle confidentielle ne doit être envoyée vers un service externe »), ni artefact binaire
+entraîné hors du dépôt.
+
+Il ne prétend pas que l'hybride soit bon dans l'absolu : 74-99 % sur des gabarits reste une
+mesure hors ligne sur données synthétiques. Le critère d'utilité du §12.3 (« taux
+d'acceptation/correction des suggestions ») ne se mesure qu'en service, et
+`AiAnalysis.acceptedValue`/`validatedBy` enregistrent déjà la donnée nécessaire pour le
+calculer.
+
+---
+
+## ADR-22 — L'inactivité d'une session se mesure sur les gestes de l'utilisateur, pas sur le trafic HTTP
+
+**Statut** : accepté — 08/09/2026 — appliqué.
+**Chapitres concernés** : §6.1 (« Expiration de session »), §6.10 (« Paramètres généraux :
+… durée des sessions »), §13 (poste laissé sans surveillance), §11.1 (format d'erreur)
+
+### Contexte
+
+`SessionTimeoutListener` (§6.10) pose sur chaque session la durée d'inactivité
+administrable. Le conteneur, lui, mesure cette inactivité en `lastAccessedTime`, que
+**toute** requête portant le cookie de session repousse — y compris une requête qu'aucun
+être humain n'a déclenchée.
+
+Or le SPA en émet une en permanence : `NotificationBell` interroge le compteur de
+notifications non lues toutes les 30 secondes (§6.8) et vit dans l'ossature, donc sur tous
+les écrans ; `ProfilePage` relisait `GET /profile` toutes les 60 secondes pour tenir son
+compte à rebours à jour. Conséquence : **un onglet simplement laissé ouvert repoussait
+indéfiniment l'échéance**. La durée administrable existait, elle n'était jamais atteinte.
+Un poste non verrouillé restait connecté sans limite, ce que le §13 cherche précisément à
+borner, et le compte à rebours du §6.1 affichait une échéance qui se réinitialisait avant
+d'avoir pu descendre — l'appel même qui la lisait la repoussait.
+
+La vérification en conditions réelles qui avait conclu « une session fraîche est bien
+rejetée après 75 s d'inactivité » ne contredisait rien : elle avait été faite par appels
+API, sans navigateur, donc sans la sonde périodique qui pose le problème.
+
+### Décision
+
+**1. La session porte sa propre horloge d'activité.** `SessionActivityFilter`
+(`crosscutting/security`) tient l'attribut `lastInteractionAt` et invalide la session dès
+que l'écart dépasse `getMaxInactiveInterval()` — le délai posé par `SessionTimeoutListener`
+depuis la `SystemParameter`. Ce filtre ne relit aucun paramètre et n'introduit aucun défaut :
+il fait respecter celui qui existe déjà.
+
+**2. Le client déclare ses requêtes d'arrière-plan**, par l'en-tête
+`X-SmartFlow-Background` (posé par `api/client.ts` sur l'option `background`). Une requête
+ainsi marquée est servie normalement mais ne repousse pas `lastInteractionAt`.
+
+**3. Une session expirée se distingue d'une absence de session** : `SESSION_EXPIRED` plutôt
+qu'`UNAUTHENTICATED`, au même format d'erreur (§11.1). Le SPA peut alors dire « votre
+session a expiré » au lieu de « connectez-vous », et `NotificationBell` arrête son minuteur
+au lieu d'interroger une route protégée jusqu'à la fermeture de l'onglet.
+
+### Raisons
+
+**Pourquoi faire confiance à un en-tête posé par le client.** Parce que mentir ne peut que
+se retourner contre celui qui ment : poser l'en-tête ne fait qu'empêcher de repousser sa
+propre échéance, et l'omettre revient au geste utilisateur ordinaire — indiscernable d'un
+vrai clic, et de toute façon déjà authentifié. Aucun choix du client ne prolonge une
+session au-delà de ce que la configuration autorise ; c'est ce qui distingue cet en-tête
+d'une décision d'autorisation, qui elle ne se délègue jamais au client (§11.1, CLAUDE.md).
+
+**Pourquoi côté serveur, et pas seulement en arrêtant de sonder côté React.** Cesser les
+appels périodiques après un moment d'inaction aurait suffi à faire expirer la session — mais
+la garantie aurait alors reposé entièrement sur le code de l'écran. §11.1 pose la règle
+inverse : « le masquage dans l'interface ne suffit pas ». Ici la décision d'expirer
+appartient au serveur, et le client ne fait que déclarer la nature de sa requête.
+
+**Pourquoi ne pas simplement supprimer la sonde.** Le badge de notifications non lues est
+une exigence du §6.8, et sans rafraîchissement périodique il n'affiche que l'état du dernier
+chargement de page. Le problème n'était pas la sonde, mais la confusion entre « trafic » et
+« activité de l'utilisateur ».
+
+**Pourquoi l'échéance affichée change d'origine.** `ProfileController.sessionExpiresAt`
+partait de `getLastAccessedTime()` ; elle part maintenant de `lastInteractionAt`, la donnée
+qui décide réellement de l'expiration. Sans ce changement, l'écran afficherait une échéance
+que le serveur n'applique pas.
+
+### Ce que cet ADR n'autorise pas
+
+Il ne change ni la durée elle-même, ni son caractère administrable (§6.10) : il n'existe
+aucun nouveau paramètre, et `SessionTimeoutListener` reste seul à lire
+`security.session.timeout-minutes`.
+
+Il ne transforme pas l'en-tête en mécanisme d'autorisation : aucune décision de droit ne le
+consulte, seule l'horloge d'inactivité le fait.
+
+Il ne prolonge jamais une session au-delà du délai configuré — il ne fait que refuser de la
+prolonger sur un trafic que l'utilisateur n'a pas produit.

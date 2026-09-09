@@ -44,6 +44,72 @@ export function notificationTypeLabel(type: NotificationType): string {
   return NOTIFICATION_LABELS[type] ?? type;
 }
 
+/** §6.8 - libellés longs des préférences (ProfilePage/NotificationPreferences) : "Demande
+ * affectée" décrit un évènement reçu, "Affectation d'une demande" décrit l'alerte qu'on
+ * choisit de recevoir - ce ne sont pas les mêmes phrases. La liste des types et lesquels
+ * sont obligatoires viennent toujours du serveur (MandatoryNotificationRule/ADR-12) ; seuls
+ * ces libellés sont posés ici. */
+const NOTIFICATION_PREFERENCE_LABELS: Record<NotificationType, string> = {
+  SUBMISSION: 'Soumission d’une demande',
+  ASSIGNMENT: 'Affectation d’une demande',
+  INFO_REQUESTED: 'Demande de complément',
+  DECISION: 'Décision (validation, rejet, retour)',
+  SLA_WARNING: 'Échéance SLA proche',
+  SLA_BREACH: 'Retard et escalade',
+  CLOSURE: 'Clôture d’une demande',
+};
+
+export function notificationPreferenceLabel(type: NotificationType): string {
+  return NOTIFICATION_PREFERENCE_LABELS[type] ?? type;
+}
+
+/** Maquette 09 - la pastille d'une notification : une lettre et une tonalité par nature
+ * d'évènement, jamais la couleur seule (§8 - une information ne doit pas reposer sur elle). */
+const NOTIFICATION_GLYPHS: Record<NotificationType, { glyph: string; tone: string }> = {
+  SUBMISSION: { glyph: '+', tone: 'tone-muted' },
+  ASSIGNMENT: { glyph: '@', tone: 'tone-primary' },
+  INFO_REQUESTED: { glyph: '?', tone: 'tone-warning' },
+  DECISION: { glyph: 'V', tone: 'tone-success' },
+  SLA_WARNING: { glyph: '!', tone: 'tone-warning' },
+  SLA_BREACH: { glyph: '!', tone: 'tone-danger' },
+  CLOSURE: { glyph: 'F', tone: 'tone-success' },
+};
+
+export function notificationGlyph(type: NotificationType): { glyph: string; tone: string } {
+  return NOTIFICATION_GLYPHS[type] ?? { glyph: '•', tone: 'tone-muted' };
+}
+
+/** §6.8 - horodatage d'une notification tel que la maquette 09 le formule : relatif tant
+ * que c'est aujourd'hui ("il y a 40 min"), puis daté ("hier à 16:20", "23/08 à 09:40"). */
+export function formatNotificationDate(value: string | null | undefined): string {
+  if (!value) {
+    return '—';
+  }
+  const date = new Date(value);
+  const time = date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+  const minutesAgo = (Date.now() - date.getTime()) / 60000;
+
+  if (minutesAgo < 1) {
+    return 'à l’instant';
+  }
+  if (minutesAgo < 60) {
+    return `il y a ${Math.round(minutesAgo)} min`;
+  }
+
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+  if (date >= startOfToday) {
+    return `il y a ${Math.floor(minutesAgo / 60)} h`;
+  }
+
+  const startOfYesterday = new Date(startOfToday);
+  startOfYesterday.setDate(startOfYesterday.getDate() - 1);
+  if (date >= startOfYesterday) {
+    return `hier à ${time}`;
+  }
+  return `${date.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })} à ${time}`;
+}
+
 export function formatDate(value: string | null | undefined): string {
   if (!value) {
     return '—';
@@ -124,6 +190,42 @@ export function priorityLabel(priority: Priority | null | undefined): string {
     return 'Non qualifiée';
   }
   return PRIORITY_LABELS[priority] ?? priority;
+}
+
+const SCOPE_LABELS: Record<string, string> = {
+  OWN: 'Périmètre propre',
+  TEAM: 'Périmètre équipe',
+  DEPARTMENT: 'Périmètre service',
+  DIRECTION: 'Périmètre direction',
+  GLOBAL: 'Périmètre global',
+};
+
+/** §5.1 - niveau de périmètre d'une habilitation, pour affichage seul (comme `roleLabel`,
+ * aucun écran n'y décide d'un droit : c'est le serveur qui tranche, `canAct`). */
+export function scopeTypeLabel(scopeType: string): string {
+  return SCOPE_LABELS[scopeType] ?? scopeType;
+}
+
+/** §6.1 "Expiration de session" - temps restant avant expiration, formulé en toutes lettres
+ * comme la maquette 10. Le compte à rebours est purement local : l'échéance vient du
+ * serveur (`MyProfileResponse.sessionExpiresAt`), jamais recalculée ici. */
+export function formatSessionCountdown(value: string | null | undefined): string {
+  if (!value) {
+    return 'sans expiration';
+  }
+  const remainingMinutes = (new Date(value).getTime() - Date.now()) / 60000;
+  if (remainingMinutes <= 0) {
+    return 'session expirée';
+  }
+  if (remainingMinutes < 1) {
+    return 'dans moins d’une minute';
+  }
+  const minutes = Math.round(remainingMinutes);
+  if (minutes < 60) {
+    return `dans ${minutes} minute${minutes > 1 ? 's' : ''}`;
+  }
+  const hours = Math.floor(minutes / 60);
+  return `dans ${hours} h ${String(minutes % 60).padStart(2, '0')}`;
 }
 
 const SLA_STATUS_LABELS: Record<string, string> = {

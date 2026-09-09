@@ -10,6 +10,7 @@ import type { ErrorResponse } from './types';
 const API_BASE = '/api/v1';
 const CSRF_COOKIE_NAME = 'XSRF-TOKEN';
 const CSRF_HEADER_NAME = 'X-XSRF-TOKEN';
+const BACKGROUND_HEADER_NAME = 'X-SmartFlow-Background';
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 /** Erreur levée pour toute réponse HTTP non 2xx, portant le format d'erreur commun
@@ -49,6 +50,12 @@ async function ensureCsrfToken(): Promise<string | null> {
 export interface ApiFetchOptions {
   method?: string;
   body?: unknown;
+  /** ADR-22 - requête périodique déclenchée par un minuteur, pas par l'utilisateur : elle
+   * porte alors l'en-tête que SessionActivityFilter lit pour ne PAS repousser l'expiration
+   * de session. Sans cela, un onglet simplement laissé ouvert (le compteur de notifications
+   * s'interroge toutes les 30 s depuis l'ossature) maintiendrait la session indéfiniment
+   * vivante et la durée administrable du §6.10 ne serait jamais atteinte. */
+  background?: boolean;
   // `object` plutôt qu'un Record<string, ...> : les appelants passent souvent une
   // interface nommée (TaskQueueFilterParams, par exemple) qui ne déclare pas de signature
   // d'index - un Record l'exigerait et rejetterait l'appel malgré des valeurs par ailleurs
@@ -79,6 +86,9 @@ export async function apiFetch<T>(path: string, options: ApiFetchOptions = {}): 
   if (options.body !== undefined) {
     headers['Content-Type'] = 'application/json';
     body = JSON.stringify(options.body);
+  }
+  if (options.background) {
+    headers[BACKGROUND_HEADER_NAME] = 'true';
   }
   if (!SAFE_METHODS.has(method)) {
     const token = await ensureCsrfToken();

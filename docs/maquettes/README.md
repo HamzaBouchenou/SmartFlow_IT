@@ -13,6 +13,8 @@ front-end **sans changer les donnees, les routes ni les appels API existants**.
 | `06-mes-taches.png` | `pages/TasksPage.tsx` |
 | `07-tableau-de-bord.png` | `pages/DashboardPage.tsx` |
 | `08-administration.png` | `pages/AdminWorkflowsPage.tsx` (gabarit pour toutes les pages Admin*) |
+| `09-notifications.png` | `pages/NotificationsPage.tsx` |
+| `10-profil.png` | `pages/ProfilePage.tsx` |
 
 ---
 
@@ -103,6 +105,20 @@ Ces details ne sont pas decoratifs, ils portent des exigences du cahier des char
    distinguer « compte inconnu » de « mot de passe incorrect ».
 8. **Accessibilite (§8)** — conserver l'anneau `:focus-visible` existant, les libelles
    explicites, les messages d'erreur rattaches au champ, et le contraste.
+9. **Preferences de notification (09)** — les cinq alertes obligatoires (affectation,
+   complement, decision, retard et escalade, cloture) s'affichent avec un interrupteur
+   **desactive et non cliquable**, jamais masque. Le §6.8 exige des preferences limitees
+   « pour eviter la desactivation des alertes obligatoires » : l'utilisateur doit voir
+   qu'elles existent et qu'il ne peut pas les couper. Seul « resume hebdomadaire » est
+   reellement basculable.
+10. **Non lu (09)** — fond `#F7F9FF`, liseré `--color-primary` a gauche, titre en gras et
+    pastille a droite. Trois marqueurs, pas un seul : le §8 demande de ne pas faire reposer
+    une information sur la seule couleur.
+11. **Champs en lecture seule (10)** — identifiant, rattachement et roles sont geres par
+    l'administrateur (§6.1, §5.1). Fond `#F7F8FA`, texte `--color-text-faint`, mention
+    « gere par l'administrateur ». Ne jamais les rendre editables cote client.
+12. **Expiration de session (10)** — le compte a rebours est affiche en
+    `--color-warning`, et la deconnexion invalide la session cote serveur (§6.1, ADR-01).
 
 ## Etats non dessines, a implementer quand meme
 

@@ -1,0 +1,7 @@
+title,description,category,priority
+Station d'accueil hors service,"Ma station d'accueil ne détecte plus les deux moniteurs depuis hier soir. Je travaille uniquement sur l'écran du portable et je ne peux plus faire mon relevé de comptes. Merci de me dépanner rapidement.",MATERIEL,HIGH
+Panne du switch du 3e étage,"Plus aucun poste du troisième étage ne remonte sur le réseau depuis 8h15. Le voyant du switch de l'armoire est éteint. Tout l'étage est à l'arrêt, personne ne peut travailler.",RESEAU,CRITICAL
+Authentification à deux facteurs en échec,"L'application d'authentification refuse tous mes codes depuis la réinitialisation de mon téléphone. Je ne peux plus ouvrir ma session ni consulter mes dossiers. J'ai besoin d'un déblocage rapidement.",ACCES_COMPTE,HIGH
+Macro Excel en erreur depuis la mise à jour,"Le classeur de suivi budgétaire renvoie une erreur d'exécution sur la macro de consolidation depuis la mise à jour de la suite bureautique de la semaine dernière. Je peux encore saisir à la main en attendant.",LOGICIEL,MEDIUM
+Renouvellement de l'abonnement de veille documentaire,"Merci de préparer un devis pour le renouvellement annuel de notre abonnement de veille documentaire auprès du fournisseur habituel. Ce n'est pas urgent, le contrat court jusqu'en décembre.",ACHAT,LOW
+Question sur la charte informatique,"Je voudrais savoir si la charte informatique autorise l'usage d'un gestionnaire de mots de passe personnel pour les accès professionnels. Ce n'est pas urgent, c'est une simple question avant la réunion d'équipe.",AUTRE,LOW

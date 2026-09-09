@@ -1,5 +1,9 @@
 -r requirements.txt
-pytest==8.3.5
+pytest==9.1.1
+# pytest 8.3.5 était signalé par pip-audit (PYSEC-2026-1845, correctif en 9.0.3) ; le saut
+# de version majeure a été fait et vérifié (les 14 tests passent à l'identique sur 9.1.1),
+# plutôt que laissé en dette. Le venv local avait de toute façon déjà dérivé vers 9.1.1,
+# donc la CI et le poste de développement ne testaient plus la même chose.
 # §15.2 étape 3 - rapport de qualité de code (ruff) et analyse des dépendances (pip-audit),
 # tous deux invoqués en CI seulement (job dédié, ci.yml), jamais par `pytest` lui-même.
 ruff==0.14.5
