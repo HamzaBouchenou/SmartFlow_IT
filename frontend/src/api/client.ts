@@ -30,6 +30,33 @@ export class ApiError extends Error {
   }
 }
 
+/** ADR-22 - le code que le serveur renvoie quand SessionActivityFilter vient d'invalider la
+ * session pour inactivité, à distinguer d'`UNAUTHENTICATED` ("vous n'avez jamais été
+ * connecté"). */
+const SESSION_EXPIRED_CODE = 'SESSION_EXPIRED';
+
+type SessionExpiredListener = () => void;
+const sessionExpiredListeners = new Set<SessionExpiredListener>();
+
+/**
+ * ADR-22 - s'abonne à l'expiration de session, quelle que soit la requête qui l'a
+ * découverte.
+ *
+ * L'expiration n'appartient à aucun écran : elle se manifeste sur le premier appel qui suit
+ * le délai, et cet appel-là peut être n'importe lequel. Chaque écran ne peut donc pas la
+ * traiter pour son compte - il rendrait un ErrorBanner de plus alors que l'application
+ * entière vient de perdre sa session. Ce client, qui voit passer tous les appels, la signale
+ * une fois ; AuthProvider s'y abonne et vide l'état d'authentification, ce qui suffit à
+ * ramener ProtectedRoute vers l'écran de connexion.
+ *
+ * Le module d'API ne connaît volontairement ni React ni le routeur : il émet un événement,
+ * il ne navigue pas.
+ */
+export function onSessionExpired(listener: SessionExpiredListener): () => void {
+  sessionExpiredListeners.add(listener);
+  return () => sessionExpiredListeners.delete(listener);
+}
+
 function readCookie(name: string): string | null {
   const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
   return match ? decodeURIComponent(match[1]) : null;
@@ -135,7 +162,13 @@ async function handleResponse<T>(response: Response): Promise<T> {
   const payload = isJson ? await response.json() : undefined;
 
   if (!response.ok) {
-    throw new ApiError(response.status, payload as Partial<ErrorResponse> | undefined);
+    const error = new ApiError(response.status, payload as Partial<ErrorResponse> | undefined);
+    if (error.status === 401 && error.code === SESSION_EXPIRED_CODE) {
+      sessionExpiredListeners.forEach((listener) => listener());
+    }
+    // L'erreur est levée dans tous les cas : l'appelant doit toujours voir son appel échouer,
+    // l'abonnement ci-dessus ne fait que prévenir l'application en plus de lui.
+    throw error;
   }
   return payload as T;
 }

@@ -71,7 +71,8 @@ public class AiClient {
             throw new InvalidRequestStateException("AI_SERVICE_UNAVAILABLE", "Le service IA n'a renvoyé aucun résultat.");
         }
         return new ClassificationResult(response.category(), response.categoryConfidence(),
-                response.priority(), response.priorityConfidence());
+                response.priority(), response.priorityConfidence(),
+                response.categoryMethod(), response.priorityMethod());
     }
 
     /** §12.1 - résumé court d'une demande longue et de ses derniers échanges. */
@@ -102,8 +103,16 @@ public class AiClient {
         }
     }
 
+    /**
+     * ADR-21 - les deux suggestions ne viennent plus de la même stratégie côté Flask
+     * (catégorie : ML ; priorité : règles), donc chacune porte sa propre confiance *et* sa
+     * propre provenance. Les fondre en un seul chiffre reviendrait à moyenner deux mesures
+     * qui n'ont pas la même échelle ni la même fiabilité - or c'est précisément ce qu'un
+     * agent doit pouvoir départager avant d'accepter l'une sans l'autre (RG-10).
+     */
     public record ClassificationResult(String category, double categoryConfidence, String priority,
-                                        double priorityConfidence) {
+                                        double priorityConfidence, String categoryMethod,
+                                        String priorityMethod) {
     }
 
     /**

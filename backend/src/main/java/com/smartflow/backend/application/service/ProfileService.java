@@ -67,8 +67,7 @@ public class ProfileService {
      */
     @Transactional(readOnly = true)
     public ProfileView getProfile(User actingUser) {
-        User user = userRepository.findById(actingUser.getId())
-                .orElseThrow(() -> new EntityNotFoundException("Compte introuvable."));
+        User user = reload(actingUser);
 
         Department department = user.getDepartment();
         User manager = user.getManager();
@@ -116,13 +115,33 @@ public class ProfileService {
         return current != null ? current.getName() : null;
     }
 
+    /**
+     * §6.1 - "mise à jour des informations de profil autorisées" : prénom et nom seulement.
+     *
+     * Écrit sur l'entité relue, jamais sur `actingUser` (voir reload) : celui-ci est le
+     * cliché détaché que la session porte depuis la connexion, et `save` d'une entité
+     * détachée est un `merge` qui recopie *toutes* ses colonnes. Sauvegarder son propre nom
+     * annulerait alors, en silence, tout ce qu'un administrateur a écrit sur ce compte
+     * depuis - une désactivation (§6.1), un changement de service (§5.1, donc de périmètre
+     * d'autorisation), un verrou de connexion (ADR-13).
+     *
+     * Les deux champs modifiés sont ensuite reportés sur le cliché de session, qui est ce
+     * que GET /auth/me renvoie au SPA (ADR-01) : sans cela l'ossature garderait l'ancien nom
+     * jusqu'à la prochaine connexion. C'est un report champ par champ des seules valeurs que
+     * cette méthode vient d'accepter, jamais une réécriture de l'entière entité.
+     */
     @Transactional
     public User updateProfile(User actingUser, String firstName, String lastName) {
+        User user = reload(actingUser);
+        user.setFirstName(firstName);
+        user.setLastName(lastName);
+        User saved = userRepository.save(user);
+
         actingUser.setFirstName(firstName);
         actingUser.setLastName(lastName);
-        User saved = userRepository.save(actingUser);
+
         // RG-11 - modification d'un compte, même par son propre titulaire.
-        auditService.record(actingUser, "UPDATE_PROFILE", "User", saved.getId().toString(), null);
+        auditService.record(saved, "UPDATE_PROFILE", "User", saved.getId().toString(), null);
         return saved;
     }
 
@@ -131,17 +150,44 @@ public class ProfileService {
      * pas l'ancien mot de passe), exige et vérifie currentPassword avant d'accepter
      * newPassword - c'est ce qui distingue un changement volontaire d'une réinitialisation
      * imposée par un tiers habilité.
+     *
+     * L'ancien mot de passe se vérifie contre l'empreinte relue en base, pas contre celle du
+     * cliché de session : une réinitialisation administrative (UserAdminService.resetPassword)
+     * survenue depuis la connexion doit invalider l'ancien mot de passe immédiatement, et pas
+     * seulement à la prochaine ouverture de session. Même raison qu'`updateProfile` d'écrire
+     * sur l'entité relue plutôt que sur `actingUser` (voir reload).
      */
     @Transactional
     public void changePassword(User actingUser, String currentPassword, String newPassword) {
-        if (!passwordEncoder.matches(currentPassword, actingUser.getPasswordHash())) {
+        User user = reload(actingUser);
+        if (!passwordEncoder.matches(currentPassword, user.getPasswordHash())) {
             throw new ProfileValidationException("INVALID_CURRENT_PASSWORD", "Le mot de passe actuel est incorrect.");
         }
-        actingUser.setPasswordHash(passwordEncoder.encode(newPassword));
-        userRepository.save(actingUser);
+        String newPasswordHash = passwordEncoder.encode(newPassword);
+        user.setPasswordHash(newPasswordHash);
+        userRepository.save(user);
+
+        // Le cliché de session porte l'empreinte que SmartFlowUserDetails.getPassword()
+        // expose : la laisser périmée ferait mentir le principal sur son propre compte.
+        actingUser.setPasswordHash(newPasswordHash);
+
         // RG-11 ; jamais le mot de passe lui-même dans le résumé d'audit (§13), comme
         // UserAdminService.resetPassword le fait déjà pour le geste administratif équivalent.
-        auditService.record(actingUser, "CHANGE_PASSWORD", "User", actingUser.getId().toString(), null);
+        auditService.record(user, "CHANGE_PASSWORD", "User", user.getId().toString(), null);
+    }
+
+    /**
+     * Le compte de l'appelant, relu dans la transaction courante.
+     *
+     * `actingUser` est l'entité que la session HTTP porte depuis la connexion (ADR-01) :
+     * elle est détachée, ses associations paresseuses ne sont pas chargeables telles quelles,
+     * et surtout ses valeurs sont celles de l'instant de la connexion. Toute lecture comme
+     * toute écriture de cette classe passe donc par cette relecture - c'est de `actingUser`
+     * que l'on tire l'identité de l'appelant, jamais son état.
+     */
+    private User reload(User actingUser) {
+        return userRepository.findById(actingUser.getId())
+                .orElseThrow(() -> new EntityNotFoundException("Compte introuvable."));
     }
 
     /** §6.1 - le profil de l'appelant tel qu'il a le droit de le consulter. */

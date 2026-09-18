@@ -16,7 +16,7 @@ import java.util.Arrays;
 import java.util.List;
 
 /**
- * §6.10 - "Gestion... des modèles d'e-mail" (§6.8). Catalogue fermé aux sept
+ * §6.10 - "Gestion... des modèles d'e-mail" (§6.8). Catalogue fermé aux
  * NotificationType (EmailTemplateResponse's own javadoc) : un administrateur ajuste le
  * sujet/corps d'un type de notification existant, il n'en crée jamais un nouveau depuis cet
  * écran (CLAUDE.md, règle numéro un). MailService reste le seul lecteur en dehors de ce

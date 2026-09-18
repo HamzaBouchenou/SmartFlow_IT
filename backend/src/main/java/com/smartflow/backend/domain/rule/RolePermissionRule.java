@@ -37,7 +37,11 @@ public class RolePermissionRule {
         // service" sur "toutes les demandes ... de son service" -> autorité de recours sur
         // l'ensemble des actions de workflow, bornée par le périmètre DEPARTMENT de
         // perimetreCouvre, pas par ce rôle.
-        grants.put(Role.SERVICE_MANAGER, EnumSet.allOf(WorkflowAction.class));
+        // SUBMIT (ADR-23) est exclue : elle n'est pas une action de workflow soumise à
+        // canAct - soumettre son brouillon relève de la propriété du dossier (RG-06),
+        // jamais d'un rôle. L'accorder ici serait sans effet mais laisserait entendre
+        // qu'un responsable peut soumettre le brouillon d'autrui, ce qui est faux.
+        grants.put(Role.SERVICE_MANAGER, EnumSet.complementOf(EnumSet.of(WorkflowAction.SUBMIT)));
         // REQUESTER, FUNCTIONAL_ADMIN, TECHNICAL_ADMIN, AUDITOR : aucune cellule du §5 ne
         // leur attribue d'action de workflow sur une demande - absents de la map, donc
         // aucune permission (le défaut est un refus, pas un accord).

@@ -369,14 +369,25 @@ tests Java passent (`./mvnw clean verify`).
 1. Dérouler une demande sur plusieurs actions (ASSIGN, VALIDATE, REQUEST_INFO, CLOSE).
 2. Ouvrir la frise d'avancement sur l'écran détail.
 
-**Résultat attendu** : chaque action exécutée produit exactement une ligne d'historique,
-avec auteur, date et commentaire éventuel visibles — aucune action sans trace, aucune ligne
-dupliquée.
+**Résultat attendu** : chaque changement d'état produit exactement une ligne d'historique,
+avec auteur, date et commentaire éventuel visibles — aucun changement sans trace, aucune
+ligne dupliquée. **La soumission elle-même en fait partie** (ADR-23) : la frise commence par
+une ligne `SUBMIT`, sans étape de départ, entrant dans la première étape du workflow.
 
 **Statut** : ✅ **Réussi** — une demande déroulée sur ASSIGN, RETURN, ASSIGN, VALIDATE,
 REQUEST_INFO, CLOSE (6 transitions) produit exactement 6 lignes d'historique
 (`GET /requests/{id}/history`), chacune avec auteur, horodatage, et commentaire quand il y
 en a un ; aucune manquante, aucune dupliquée.
+
+**Mise à jour du 11/09/2026 (ADR-23).** Cette exécution est antérieure à ADR-23, qui a
+refermé l'écart que ce scénario ne mesurait pas encore : `DRAFT → SUBMITTED` n'écrivait
+alors **aucune** ligne, si bien que la frise commençait après la soumission et que
+l'indicateur du §3.4 (« 100 % des changements d'état ») n'était pas tenu au pied de la
+lettre. Le compte attendu devient donc **7** pour ce même parcours (`SUBMIT` + les
+6 transitions). Re-vérifié sur la pile réelle : une demande fraîchement soumise renvoie
+exactement une ligne, `action: "SUBMIT"`, `fromStepName: null`, `toStepName: "Qualification"`,
+avec auteur et horodatage — et la collection Postman (`postman/`, dossier 3) le rejoue
+automatiquement à chaque exécution.
 
 ### REC-SCN-18 — Affectation manuelle à un agent précis
 **Couvre** : REC-05 · §6.6
@@ -703,6 +714,11 @@ deux lignes d'historique distinctes et horodatées.
 (`POST /requests/{id}/reopen`) : `currentStepId` revient exactement à TRAITEMENT (l'étape
 quittée par CLOSE), `status: SUBMITTED`. Historique à 4 lignes exactes (ASSIGN, VALIDATE,
 CLOSE, REOPEN), une par transition réellement exécutée (RG-04/§3.4).
+
+**Mise à jour du 11/09/2026 (ADR-23).** Depuis, la soumission écrit elle aussi sa ligne : le
+même parcours en produit **5** (`SUBMIT`, ASSIGN, VALIDATE, CLOSE, REOPEN). Le résultat du
+scénario — reprise à l'étape quittée, clôture et réouverture en deux lignes distinctes et
+horodatées — est inchangé.
 
 ### REC-SCN-35 — Réouverture refusée hors délai ou type non autorisé
 **Couvre** : RG-08

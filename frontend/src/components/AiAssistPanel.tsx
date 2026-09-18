@@ -111,9 +111,11 @@ function AiAnalysisItem({ analysis, onValidate }: AiAnalysisItemProps) {
     <li className="ai-analysis-item">
       <div className="ai-analysis-meta">
         <span className="ai-analysis-type">{typeLabel(analysis.analysisType)}</span>
-        {analysis.confidenceScore !== null && (
-          <span className="ai-confidence">confiance {(analysis.confidenceScore * 100).toFixed(0)} %</span>
-        )}
+        {confidences(analysis).map((entry) => (
+          <span className="ai-confidence" key={entry.label}>
+            {entry.label} {(entry.value * 100).toFixed(0)} %
+          </span>
+        ))}
         <span className="ai-analysis-date">{formatDate(analysis.createdAt)}</span>
       </div>
 
@@ -151,6 +153,38 @@ function typeLabel(type: AiAnalysisType): string {
     case 'REPLY_SUGGESTION':
       return 'Suggestion de réponse';
   }
+}
+
+/**
+ * §12.2/ADR-21/RG-10 - la confiance affichée, par cible quand le serveur la détaille.
+ *
+ * Une classification porte deux suggestions produites par deux classifieurs différents
+ * (catégorie : ML ; priorité : règles), donc deux fiabilités qui n'ont aucune raison de se
+ * ressembler. `confidenceScore` en est la moyenne : elle peut afficher un honnête « 66 % »
+ * sur une catégorie très sûre accompagnée d'une priorité douteuse, sans dire laquelle des
+ * deux vérifier - alors que RG-10 fait justement reposer la décision sur l'agent. Le détail
+ * vit dans `rawResult` ; la moyenne ne reste affichée que lorsqu'il n'y est pas (résumé, ou
+ * analyse enregistrée avant cet enrichissement).
+ */
+function confidences(analysis: AiAnalysisResponse): { label: string; value: number }[] {
+  if (analysis.rawResult) {
+    try {
+      const parsed = JSON.parse(analysis.rawResult) as {
+        categoryConfidence?: number;
+        priorityConfidence?: number;
+      };
+      if (typeof parsed.categoryConfidence === 'number' && typeof parsed.priorityConfidence === 'number') {
+        return [
+          { label: 'catégorie', value: parsed.categoryConfidence },
+          { label: 'priorité', value: parsed.priorityConfidence },
+        ];
+      }
+    } catch {
+      // rawResult n'est pas toujours du JSON (un résumé est du texte brut) : on retombe
+      // simplement sur la moyenne, ce n'est pas une erreur à signaler à l'utilisateur.
+    }
+  }
+  return analysis.confidenceScore !== null ? [{ label: 'confiance', value: analysis.confidenceScore }] : [];
 }
 
 /** CLASSIFICATION porte un petit JSON ({"category","priority"} - ADR-16) ; les autres types, du texte brut. */

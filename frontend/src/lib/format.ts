@@ -13,6 +13,7 @@ const STATUS_LABELS: Record<RequestStatus, string> = {
 };
 
 const ACTION_LABELS: Record<WorkflowAction, string> = {
+  SUBMIT: 'Soumettre',
   VALIDATE: 'Valider',
   REJECT: 'Rejeter',
   RETURN: 'Retourner',
@@ -30,6 +31,7 @@ const NOTIFICATION_LABELS: Record<NotificationType, string> = {
   SLA_WARNING: 'Échéance proche',
   SLA_BREACH: 'Échéance dépassée',
   CLOSURE: 'Demande clôturée',
+  MENTION: 'Mention dans un commentaire',
 };
 
 export function statusLabel(status: RequestStatus): string {
@@ -57,6 +59,7 @@ const NOTIFICATION_PREFERENCE_LABELS: Record<NotificationType, string> = {
   SLA_WARNING: 'Échéance SLA proche',
   SLA_BREACH: 'Retard et escalade',
   CLOSURE: 'Clôture d’une demande',
+  MENTION: 'Mention dans un commentaire',
 };
 
 export function notificationPreferenceLabel(type: NotificationType): string {
@@ -73,6 +76,8 @@ const NOTIFICATION_GLYPHS: Record<NotificationType, { glyph: string; tone: strin
   SLA_WARNING: { glyph: '!', tone: 'tone-warning' },
   SLA_BREACH: { glyph: '!', tone: 'tone-danger' },
   CLOSURE: { glyph: 'F', tone: 'tone-success' },
+  // §6.4/ADR-24 - une lettre, comme DECISION/CLOSURE : '@' est déjà pris par l'affectation.
+  MENTION: { glyph: 'M', tone: 'tone-primary' },
 };
 
 export function notificationGlyph(type: NotificationType): { glyph: string; tone: string } {

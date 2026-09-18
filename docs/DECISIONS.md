@@ -1133,6 +1133,16 @@ qu'`UNAUTHENTICATED`, au même format d'erreur (§11.1). Le SPA peut alors dire 
 session a expiré » au lieu de « connectez-vous », et `NotificationBell` arrête son minuteur
 au lieu d'interroger une route protégée jusqu'à la fermeture de l'onglet.
 
+*Précision ajoutée le 10/09/2026, à la relecture du lot.* Ce point 3 est resté purement
+théorique un temps : le code était produit par `RestAuthenticationEntryPoint` et lu par
+personne. L'expiration n'appartenant à aucun écran — elle se manifeste sur le premier appel
+qui suit le délai, et cet appel peut être n'importe lequel — elle est signalée là où tous les
+appels passent : `api/client.ts` expose `onSessionExpired`, `AuthProvider` s'y abonne et vide
+l'utilisateur, ce qui suffit à ce que `ProtectedRoute` ramène vers `/login` par le chemin déjà
+existant, et `LoginPage` dit pourquoi (jamais après une déconnexion volontaire). La confier à
+chaque écran aurait produit un `ErrorBanner` de plus alors que l'application entière vient de
+perdre sa session.
+
 ### Raisons
 
 **Pourquoi faire confiance à un en-tête posé par le client.** Parce que mentir ne peut que
@@ -1169,3 +1179,168 @@ consulte, seule l'horloge d'inactivité le fait.
 
 Il ne prolonge jamais une session au-delà du délai configuré — il ne fait que refuser de la
 prolonger sur un trafic que l'utilisateur n'a pas produit.
+
+---
+
+## ADR-23 — La soumission est un changement d'état, donc une ligne d'historique
+
+**Statut** : accepté — 11/09/2026 — appliqué.
+**Chapitres concernés** : §3.4 (indicateur de traçabilité : « 100 % des changements d'état
+enregistrés dans l'historique »), §6.4 (« Affichage d'une frise d'avancement et de
+l'historique complet »), §17.2 REC-04 (« Toutes les actions importantes sont visibles avec
+auteur, date et contenu utile »), §6.5, RG-04
+
+### Contexte
+
+`RequestHistory` porte une ligne par transition de workflow réellement exécutée, et
+`WorkflowTransitionService` garantit le 1-pour-1. Mais `WorkflowAction` ne comptait aucune
+valeur `SUBMIT` : le passage `DRAFT → SUBMITTED`, qui est pourtant le **premier** changement
+d'état d'un dossier et celui qui gèle son workflow (RG-03), n'écrivait aucune ligne. La
+frise du §6.4 commençait donc à la première action de workflow réellement jouée (ASSIGN,
+VALIDATE…) et ne montrait jamais la soumission elle-même.
+
+Le comportement était connu et documenté dans `CLAUDE.md` depuis la revue post-S9, sous
+réserve d'un ADR explicite : c'est ce que cette décision tranche.
+
+L'écart était réel, pas seulement formel. L'indicateur du §3.4 vise **100 %** des changements
+d'état ; un dossier soumis puis clôturé affichait un historique qui démarrait après sa propre
+soumission, et rien dans la frise ne disait ni quand ni par qui il était entré dans le
+circuit. La seule trace existante était la ligne `audit_log` écrite par
+`RequestService.submit` — mais le journal d'audit relève du §13.1 et n'est lisible que par
+FUNCTIONAL_ADMIN/TECHNICAL_ADMIN/AUDITOR (`canViewAuditLog`) : le demandeur et l'agent, eux,
+ne voyaient rien. Un journal d'audit réservé aux administrateurs ne satisfait pas un
+indicateur de traçabilité qui porte sur l'historique du dossier.
+
+### Décision
+
+**1. `SUBMIT` rejoint `WorkflowAction`**, et `RequestService.submit` écrit une ligne
+`RequestHistory` — `fromStep = null`, `toStep` = première étape du workflow gelé, acteur =
+la personne qui soumet — dans la même transaction que le changement de statut.
+
+**2. `SUBMIT` n'est jamais résolue par une `Transition`**, exactement comme `REOPEN`
+(ADR-14). Les deux forment désormais une famille explicite : des actions qui écrivent une
+ligne d'historique sans être un arc du graphe de workflow. `WorkflowAction.isConfigurable()`
+les nomme, et `WorkflowAdminService` refuse (`ACTION_NOT_CONFIGURABLE`) qu'un administrateur
+en câble une sur une étape.
+
+**3. `SUBMIT` n'est accordée à aucun rôle** dans `RolePermissionRule` : elle ne passe pas
+par `canAct`. Le droit de soumettre reste ce qu'il était — la propriété du brouillon
+(`getOwnedDraft`, RG-06).
+
+### Raisons
+
+**Pourquoi dans `WorkflowAction` plutôt que dans une énumération d'historique séparée.**
+Parce que `REOPEN` y est déjà, pour la même raison, depuis ADR-14 : `request_history.action`
+est typée par cette énumération, et l'agrégation du taux de réouverture
+(`DashboardService`/`RequestHistoryRepository.findByRequestIdInAndAction`) la relit telle
+quelle. Introduire un second type d'action aurait dédoublé l'énumération, la colonne, le
+mapper et le type TypeScript pour une seule valeur, sans rien rendre plus sûr : ce qui doit
+être garanti, c'est qu'aucune de ces deux valeurs ne soit configurable comme transition, et
+c'est une garde, pas un type.
+
+**Pourquoi une garde plutôt qu'une convention.** Avant cette décision, rien n'empêchait un
+administrateur de créer une transition `REOPEN` depuis `AdminWorkflowsPage` : elle aurait été
+enregistrée, proposée dans `availableActions[]`, puis jamais exécutable — ADR-14 réserve
+`REOPEN` à `RequestService.reopen`. Le défaut existait déjà ; ajouter `SUBMIT` sans le fermer
+l'aurait doublé. `isConfigurable()` vit sur l'énumération elle-même pour qu'une valeur
+ajoutée plus tard doive se positionner explicitement.
+
+**Pourquoi `fromStep = null`.** Un brouillon n'est sur aucune étape : `Request.currentStep`
+est `null` jusqu'à la soumission. La ligne dit donc « entré à l'étape X », pas « passé de X à
+Y » — même forme que la ligne `REOPEN`, que la frise sait déjà afficher.
+
+### Ce que cet ADR n'autorise pas
+
+Il ne fait pas de la soumission une transition de workflow : aucune `Transition` ne porte
+`SUBMIT`, `WorkflowTransitionService.execute` ne la voit jamais, et `canAct` ne l'évalue pas.
+
+Il ne change aucun droit : qui pouvait soumettre avant peut soumettre après, et personne
+d'autre.
+
+Il ne rétro-écrit pas l'historique des demandes déjà soumises. Les dossiers créés avant cette
+version gardent une frise qui commence à leur première action de workflow ; aucune migration
+ne fabrique une ligne pour un geste dont l'horodatage exact serait deviné plutôt que
+constaté. `Request.submittedAt` reste, pour ces dossiers-là, la seule source de la date de
+soumission.
+
+---
+
+## ADR-24 — Une mention est résolue par le serveur et ne franchit jamais le périmètre de lecture
+
+**Statut** : accepté — 11/09/2026 — appliqué.
+**Chapitres concernés** : §6.4 (« Ajout de commentaires, **mentions** et pièces jointes
+autorisées »), §6.8 (centre de notifications, préférences), RG-06, §11.1 (le masquage dans
+l'interface ne suffit pas), ADR-11 (qui peut écrire un commentaire), ADR-12 (alertes
+obligatoires)
+
+### Contexte
+
+Le §6.4 nomme les mentions dans la même phrase que les commentaires et les pièces jointes,
+toutes deux construites depuis le lot S7. La table `comment_mentions` existait même dans le
+schéma initial (V2) : `V3` l'a retirée en notant « relève du §6.4 mais ne fait pas partie du
+lot en cours ». Elle n'est jamais revenue, et le mot « mentions » n'apparaissait plus que
+dans la javadoc de `Comment`.
+
+Une mention pose deux questions que le cahier des charges ne tranche pas : **comment on
+désigne quelqu'un**, et **ce qui se passe quand on désigne quelqu'un qui n'a pas le droit de
+lire le dossier**. La seconde est la seule qui compte vraiment : une mention produit une
+notification, et une notification nomme une demande. Mal posée, elle contourne RG-06 par un
+chemin que ni `canView` ni `canAct` ne gardent.
+
+### Décision
+
+**1. Le jeton de mention est l'adresse e-mail**, `@prenom.nom@domaine`, parce que c'est la
+seule donnée d'un compte qui soit unique par contrainte de base (`users.email`). La
+résolution est faite **par le serveur**, en relisant le texte enregistré — jamais à partir
+d'une liste d'identifiants fournie par le client.
+
+**2. Une mention n'est enregistrée et notifiée que si la personne désignée peut déjà lire la
+demande** (`canView`). Une mention non résolue, ou résolue vers quelqu'un hors périmètre,
+est **silencieusement ignorée** : le texte du commentaire reste tel qu'il a été écrit, aucune
+ligne `comment_mentions` n'est créée, aucune notification ne part, et l'auteur n'apprend
+rien sur l'existence ou le périmètre de la personne qu'il a nommée.
+
+**3. `MENTION` rejoint `NotificationType`** et reste **facultative** au sens d'ADR-12 : un
+destinataire peut couper l'e-mail de mention dans ses préférences (§6.8). Seules
+`SLA_WARNING`/`SLA_BREACH` restent obligatoires — une mention est une sollicitation entre
+collègues, pas un engagement de service.
+
+**4. L'auteur ne se notifie pas lui-même** en se mentionnant.
+
+### Raisons
+
+**Pourquoi le serveur relit le texte plutôt que de recevoir des identifiants.** Parce que
+l'inverse laisserait le client décider qui est notifié : il suffirait d'envoyer un id
+arbitraire pour faire parvenir à n'importe qui le titre et la référence d'un dossier qu'il
+n'a pas le droit de voir. §11.1 pose la règle — le client n'est pas une source
+d'autorisation — et ADR-11 l'applique déjà à l'écriture d'un commentaire. La mention suit le
+même chemin.
+
+**Pourquoi un silence plutôt qu'une erreur.** Refuser le commentaire avec « cette personne
+n'a pas accès à cette demande » répondrait à une question que l'auteur n'a pas le droit de
+poser : c'est un oracle d'appartenance, la version « mention » du 403 que CLAUDE.md interdit
+déjà au profit du 404. Le commentaire est donc accepté tel quel ; simplement, personne n'est
+prévenu. L'écran affiche les mentions effectivement retenues, ce qui suffit à l'auteur pour
+constater que son destinataire n'en fait pas partie, sans rien lui apprendre sur la raison.
+
+**Pourquoi l'adresse e-mail et pas le nom.** Deux personnes peuvent porter le même nom, et
+un identifiant construit (« p.nom ») serait un deuxième schéma d'identité à maintenir, avec
+ses collisions. L'e-mail est déjà l'identifiant de connexion (§6.1) et déjà unique en base.
+Le coût est cosmétique — un jeton plus long dans le texte —, et l'écran de saisie rappelle
+la forme attendue.
+
+**Pourquoi un brouillon ne notifie personne.** `canView` est faux pour tout le monde sur une
+demande `DRAFT` (ADR-11) : mentionner quelqu'un dans un commentaire de brouillon est donc,
+par construction, sans effet jusqu'à la soumission. C'est le comportement voulu — un
+brouillon n'est pas encore un dossier partagé.
+
+### Ce que cet ADR n'autorise pas
+
+Il ne crée aucun droit de lecture : être mentionné ne donne pas accès à la demande, puisque
+seul quelqu'un qui y a déjà accès peut être mentionné.
+
+Il n'ajoute aucune alerte obligatoire (ADR-12 reste inchangée) et ne notifie jamais par un
+canal que le destinataire a coupé.
+
+Il ne transforme pas le corps du commentaire : le texte est stocké tel qu'il a été saisi,
+les mentions sont une table à côté, jamais une réécriture du contenu.

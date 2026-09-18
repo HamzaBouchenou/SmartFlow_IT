@@ -49,13 +49,23 @@ class RolePermissionRuleTest {
     }
 
     @Test
-    @DisplayName("§5 - Responsable de service pilote toutes les demandes de son service: toutes les actions de workflow")
-    void serviceManagerGrantsEveryWorkflowAction() {
+    @DisplayName("§5 - Responsable de service pilote toutes les demandes de son service: toutes les actions de workflow sauf SUBMIT")
+    void serviceManagerGrantsEveryWorkflowActionButSubmit() {
         for (WorkflowAction action : WorkflowAction.values()) {
+            if (action == WorkflowAction.SUBMIT) {
+                continue;
+            }
             assertThat(rule.grants(Role.SERVICE_MANAGER, action))
                     .as("SERVICE_MANAGER should be granted %s", action)
                     .isTrue();
         }
+    }
+
+    @ParameterizedTest
+    @EnumSource(Role.class)
+    @DisplayName("ADR-23 - SUBMIT ne passe pas par canAct: aucun rôle ne se la voit accorder")
+    void submitIsGrantedToNoRole(Role role) {
+        assertThat(rule.grants(role, WorkflowAction.SUBMIT)).isFalse();
     }
 
     @ParameterizedTest

@@ -9,11 +9,13 @@ import com.smartflow.backend.domain.entity.Step;
 import com.smartflow.backend.domain.entity.User;
 import com.smartflow.backend.domain.entity.UserRoleAssignment;
 import com.smartflow.backend.domain.entity.WorkflowDefinition;
+import com.smartflow.backend.domain.enums.NotificationType;
 import com.smartflow.backend.domain.enums.PublicationStatus;
 import com.smartflow.backend.domain.enums.Role;
 import com.smartflow.backend.domain.enums.ScopeType;
 import com.smartflow.backend.infrastructure.repository.DepartmentRepository;
 import com.smartflow.backend.infrastructure.repository.FormDefinitionRepository;
+import com.smartflow.backend.infrastructure.repository.NotificationRepository;
 import com.smartflow.backend.infrastructure.repository.RequestTypeRepository;
 import com.smartflow.backend.infrastructure.repository.ServiceCatalogRepository;
 import com.smartflow.backend.infrastructure.repository.StepRepository;
@@ -40,6 +42,7 @@ import tools.jackson.databind.ObjectMapper;
 import java.util.Map;
 import java.util.Set;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -87,6 +90,8 @@ class CommentControllerIT {
     private UserRepository userRepository;
     @Autowired
     private UserRoleAssignmentRepository userRoleAssignmentRepository;
+    @Autowired
+    private NotificationRepository notificationRepository;
 
     private Department department;
     private RequestType requestType;
@@ -194,6 +199,105 @@ class CommentControllerIT {
         mockMvc.perform(post("/api/v1/requests/{id}/comments", id).with(user(asAuditor)).with(csrf())
                         .contentType("application/json").content("{\"body\":\"x\"}"))
                 .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("§6.4/ADR-24 - mentionner quelqu'un d'habilité le retient et le notifie")
+    void mentioningAnAuthorizedUserRecordsItAndNotifies() throws Exception {
+        Long id = submittedRequest();
+
+        User manager = userRepository.save(new User("Nawal", "Manager", "nawal.mention@example.com", "hash"));
+        userRoleAssignmentRepository.save(new UserRoleAssignment(manager, Role.SERVICE_MANAGER, ScopeType.DEPARTMENT, department.getId()));
+
+        String body = objectMapper.writeValueAsString(Map.of(
+                "body", "Peux-tu regarder, @nawal.mention@example.com ? Merci."));
+        mockMvc.perform(post("/api/v1/requests/{id}/comments", id).with(user(asRequester)).with(csrf())
+                        .contentType("application/json").content(body))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.mentions.length()").value(1))
+                .andExpect(jsonPath("$.mentions[0].userId").value(manager.getId()))
+                .andExpect(jsonPath("$.mentions[0].name").value("Nawal Manager"))
+                // ADR-24 - l'adresse n'est jamais renvoyée : l'afficher publierait l'annuaire.
+                .andExpect(jsonPath("$.mentions[0].email").doesNotExist());
+
+        // §6.8 - la personne mentionnée reçoit une notification applicative nommant la demande.
+        assertThat(notificationRepository.findAll())
+                .filteredOn(n -> n.getType() == NotificationType.MENTION)
+                .singleElement()
+                .satisfies(n -> {
+                    assertThat(n.getRecipient().getId()).isEqualTo(manager.getId());
+                    assertThat(n.getRequest().getId()).isEqualTo(id);
+                });
+
+        // La mention se relit avec le fil, pas seulement dans la réponse de création.
+        mockMvc.perform(get("/api/v1/requests/{id}/comments", id).with(user(asRequester)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].mentions[0].userId").value(manager.getId()));
+    }
+
+    @Test
+    @DisplayName("RG-06/ADR-24 - mentionner quelqu'un hors périmètre est ignoré en silence: pas de ligne, pas de notification, pas d'erreur")
+    void mentioningAnUnauthorizedUserIsSilentlyIgnored() throws Exception {
+        Long id = submittedRequest();
+
+        // Un compte réel, actif, mais sans aucune habilitation couvrant cette demande.
+        User outsider = userRepository.save(new User("Leila", "Chraibi", "leila.mention@example.com", "hash"));
+
+        String body = objectMapper.writeValueAsString(Map.of(
+                "body", "Avis de @leila.mention@example.com et de @inconnu@example.com ?"));
+        mockMvc.perform(post("/api/v1/requests/{id}/comments", id).with(user(asRequester)).with(csrf())
+                        .contentType("application/json").content(body))
+                // Le commentaire est accepté tel quel : refuser serait un oracle d'appartenance.
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.body").value("Avis de @leila.mention@example.com et de @inconnu@example.com ?"))
+                .andExpect(jsonPath("$.mentions.length()").value(0));
+
+        assertThat(notificationRepository.findAll())
+                .filteredOn(n -> n.getType() == NotificationType.MENTION)
+                .isEmpty();
+        assertThat(outsider.getId()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("ADR-24 - se mentionner soi-même ne se notifie pas")
+    void mentioningOneselfDoesNotNotify() throws Exception {
+        Long id = submittedRequest();
+
+        String body = objectMapper.writeValueAsString(Map.of("body", "Note pour @amina.comments@example.com"));
+        mockMvc.perform(post("/api/v1/requests/{id}/comments", id).with(user(asRequester)).with(csrf())
+                        .contentType("application/json").content(body))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.mentions.length()").value(0));
+
+        assertThat(notificationRepository.findAll())
+                .filteredOn(n -> n.getType() == NotificationType.MENTION)
+                .isEmpty();
+    }
+
+    @Test
+    @DisplayName("ADR-24 - sur un brouillon, personne n'est visible: une mention n'y notifie jamais")
+    void mentionOnADraftNotifiesNobody() throws Exception {
+        Long id = createDraft();
+
+        User manager = userRepository.save(new User("Nawal", "Manager", "nawal.draft@example.com", "hash"));
+        userRoleAssignmentRepository.save(new UserRoleAssignment(manager, Role.SERVICE_MANAGER, ScopeType.DEPARTMENT, department.getId()));
+
+        String body = objectMapper.writeValueAsString(Map.of("body", "@nawal.draft@example.com un avis ?"));
+        mockMvc.perform(post("/api/v1/requests/{id}/comments", id).with(user(asRequester)).with(csrf())
+                        .contentType("application/json").content(body))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.mentions.length()").value(0));
+
+        assertThat(notificationRepository.findAll())
+                .filteredOn(n -> n.getType() == NotificationType.MENTION)
+                .isEmpty();
+    }
+
+    private Long submittedRequest() throws Exception {
+        Long id = createDraft();
+        mockMvc.perform(post("/api/v1/requests/{id}/submit", id).with(user(asRequester)).with(csrf()))
+                .andExpect(status().isOk());
+        return id;
     }
 
     private Long createDraft() throws Exception {

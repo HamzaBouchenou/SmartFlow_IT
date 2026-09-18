@@ -131,7 +131,7 @@ class AiAnalysisControllerIT {
     @DisplayName("§12.1/RG-10 - CLASSIFICATION stores a suggestion as its own AiAnalysis row, never writes to the Request")
     void classificationStoresSuggestionWithoutTouchingRequest() throws Exception {
         when(aiClient.classify(anyString(), anyString()))
-                .thenReturn(new AiClient.ClassificationResult("MATERIEL", 0.9, "HIGH", 0.8));
+                .thenReturn(new AiClient.ClassificationResult("MATERIEL", 0.9, "HIGH", 0.8, "ml", "rules"));
         Long id = createDraft();
 
         MvcResult result = mockMvc.perform(post("/api/v1/ai/requests/{id}/analyze", id).with(user(asRequester)).with(csrf())
@@ -192,7 +192,7 @@ class AiAnalysisControllerIT {
     @DisplayName("ADR-16/ADR-11 - an AUDITOR can list a submitted request's AI analyses but cannot request a new one (404, read-only)")
     void auditorCanListButNotAnalyze() throws Exception {
         when(aiClient.classify(anyString(), anyString()))
-                .thenReturn(new AiClient.ClassificationResult("MATERIEL", 0.9, "HIGH", 0.8));
+                .thenReturn(new AiClient.ClassificationResult("MATERIEL", 0.9, "HIGH", 0.8, "ml", "rules"));
         Long id = createDraft();
         mockMvc.perform(post("/api/v1/requests/{id}/submit", id).with(user(asRequester)).with(csrf()))
                 .andExpect(status().isOk());

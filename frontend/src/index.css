@@ -610,6 +610,20 @@ input[type='radio'] {
   margin-bottom: 32px;
 }
 
+/* §6.1/ADR-22 - session expirée par inactivité. Teinte d'avertissement, pas de danger :
+   rien n'a échoué, un délai s'est écoulé. Le liseré porte l'information autant que le fond,
+   le §8 demandant de ne pas la faire reposer sur la seule couleur. */
+.login-notice {
+  margin: -20px 0 24px;
+  padding: 12px 14px;
+  border: 1px solid var(--color-warning);
+  border-left-width: 3px;
+  border-radius: var(--radius);
+  background: var(--color-warning-bg);
+  color: var(--color-text);
+  font-size: var(--text-secondary);
+}
+
 .login-form label {
   display: block;
   font-size: var(--text-secondary);
@@ -1685,6 +1699,14 @@ input[type='radio'] {
 .comment-meta,
 .attachment-meta,
 .ai-analysis-meta {
+  font-size: var(--text-caption);
+  color: var(--color-text-muted);
+}
+
+/* §6.4/ADR-24 - les personnes réellement mentionnées, et le rappel de la syntaxe. */
+.comment-mentions,
+.comment-hint {
+  margin: 6px 0 0;
   font-size: var(--text-caption);
   color: var(--color-text-muted);
 }

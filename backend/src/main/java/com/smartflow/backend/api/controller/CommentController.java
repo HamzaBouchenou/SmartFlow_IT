@@ -4,6 +4,7 @@ import com.smartflow.backend.api.dto.request.CreateCommentRequest;
 import com.smartflow.backend.api.dto.response.CommentResponse;
 import com.smartflow.backend.api.mapper.CommentMapper;
 import com.smartflow.backend.application.service.CommentService;
+import com.smartflow.backend.domain.entity.Comment;
 import com.smartflow.backend.crosscutting.security.SmartFlowUserDetails;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -33,11 +34,17 @@ public class CommentController {
     @ResponseStatus(HttpStatus.CREATED)
     public CommentResponse create(@AuthenticationPrincipal SmartFlowUserDetails principal, @PathVariable Long requestId,
                                    @Valid @RequestBody CreateCommentRequest body) {
-        return CommentMapper.toResponse(commentService.addComment(principal.getUser(), requestId, body.body()));
+        Comment comment = commentService.addComment(principal.getUser(), requestId, body.body());
+        // §6.4/ADR-24 - la réponse dit qui a réellement été mentionné, jamais qui a été
+        // nommé : une adresse hors périmètre n'apparaît pas, en silence.
+        return CommentMapper.toResponse(comment,
+                commentService.findMentionsByComment(List.of(comment.getId())).getOrDefault(comment.getId(), List.of()));
     }
 
     @GetMapping
     public List<CommentResponse> list(@AuthenticationPrincipal SmartFlowUserDetails principal, @PathVariable Long requestId) {
-        return commentService.listComments(principal.getUser(), requestId).stream().map(CommentMapper::toResponse).toList();
+        List<Comment> comments = commentService.listComments(principal.getUser(), requestId);
+        return CommentMapper.toResponses(comments,
+                commentService.findMentionsByComment(comments.stream().map(Comment::getId).toList()));
     }
 }

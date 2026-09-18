@@ -5,6 +5,7 @@ import com.smartflow.backend.domain.rule.AutoAssignmentRule;
 import com.smartflow.backend.domain.rule.CommentRequirementRule;
 import com.smartflow.backend.domain.rule.FormValidationRule;
 import com.smartflow.backend.domain.rule.MandatoryNotificationRule;
+import com.smartflow.backend.domain.rule.MentionParsingRule;
 import com.smartflow.backend.domain.rule.RolePermissionRule;
 import com.smartflow.backend.domain.rule.ScopeRule;
 import com.smartflow.backend.domain.rule.SeparationOfDutiesRule;
@@ -37,6 +38,11 @@ public class DomainRuleConfig {
     @Bean
     public RolePermissionRule rolePermissionRule() {
         return new RolePermissionRule();
+    }
+
+    @Bean
+    public MentionParsingRule mentionParsingRule() {
+        return new MentionParsingRule();
     }
 
     @Bean

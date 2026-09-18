@@ -160,6 +160,13 @@ public class RequestService {
         request = requestRepository.save(request);
         slaSuspensionService.onStepEntered(request, firstStep, now);
 
+        // §3.4/ADR-23 - la soumission est le premier changement d'état du dossier, donc une
+        // ligne d'historique comme les autres (RG-04 : auteur et horodatage). fromStep est
+        // null - un brouillon n'est sur aucune étape -, toStep est l'étape d'entrée du
+        // workflow qui vient d'être gelé. SUBMIT n'est jamais résolue par une Transition :
+        // cette ligne est écrite ici, jamais par WorkflowTransitionService.
+        requestHistoryRepository.save(new RequestHistory(request, null, WorkflowAction.SUBMIT, firstStep, actingUser));
+
         // §6.8 - "soumission" est l'un des "événements importants" à notifier. Ambiguïté du
         // destinataire tranchée pragmatiquement (aucun ADR requis, cf. Step 2 de la session) :
         // à la soumission, personne n'est encore affecté ni n'a de décision à prendre - le

@@ -71,6 +71,11 @@ export function CommentThread({ requestId }: CommentThreadProps) {
               <strong>{comment.authorName}</strong> · {formatDate(comment.createdAt)}
             </div>
             <p>{comment.body}</p>
+            {comment.mentions.length > 0 && (
+              <p className="comment-mentions">
+                {`Mentionne\u00a0: ${comment.mentions.map((mention) => mention.name).join(', ')}`}
+              </p>
+            )}
           </li>
         ))}
         {!loading && comments.length === 0 && <li className="comment-empty">Aucun commentaire pour l'instant.</li>}
@@ -78,7 +83,18 @@ export function CommentThread({ requestId }: CommentThreadProps) {
 
       <form className="comment-form" onSubmit={handleSubmit}>
         <label htmlFor="comment-body">Ajouter un commentaire</label>
-        <textarea id="comment-body" value={body} onChange={(event) => setBody(event.target.value)} />
+        <textarea
+          id="comment-body"
+          value={body}
+          onChange={(event) => setBody(event.target.value)}
+          aria-describedby="comment-mention-hint"
+        />
+        {/* ADR-24 - le serveur résout lui-même les mentions depuis le texte enregistré ; cet
+            indice rappelle la forme attendue, il ne pré-résout rien côté écran. */}
+        <p id="comment-mention-hint" className="comment-hint">
+          Mentionnez quelqu'un avec @ suivi de son adresse e-mail. Seules les personnes qui ont déjà accès à cette
+          demande sont notifiées.
+        </p>
         <button type="submit" disabled={submitting || !body.trim()}>
           Publier
         </button>

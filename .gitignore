@@ -4,3 +4,7 @@ dist/
 target/
 .claude/
 CLAUDE.md
+
+# Sauvegardes produites par scripts/backup.sh (§15.3) - jamais dans le dépôt :
+# ce sont des données, et sur un environnement réel elles seraient sensibles.
+backups/

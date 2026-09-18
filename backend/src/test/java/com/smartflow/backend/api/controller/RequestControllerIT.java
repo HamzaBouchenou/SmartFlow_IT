@@ -362,15 +362,25 @@ class RequestControllerIT {
     }
 
     @Test
-    @DisplayName("§6.4 - GET /api/v1/requests/{id}/history is readable by the requester and starts empty (SUBMIT is not itself a WorkflowAction/history row - see RequestTransitionControllerIT for a populated frise)")
-    void historyReadableAndInitiallyEmpty() throws Exception {
+    @DisplayName("§3.4/§6.4/ADR-23 - the frise starts at the submission itself: one SUBMIT row, no from-step, entering the workflow's first step")
+    void historyStartsAtTheSubmission() throws Exception {
         Long id = createDraft(Map.of("justification", "Clavier cassé"));
+
+        // Avant la soumission, un brouillon n'a encore changé d'état d'aucune façon.
+        mockMvc.perform(get("/api/v1/requests/{id}/history", id).with(user(asRequester)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(0));
+
         mockMvc.perform(post("/api/v1/requests/{id}/submit", id).with(user(asRequester)).with(csrf()))
                 .andExpect(status().isOk());
 
         mockMvc.perform(get("/api/v1/requests/{id}/history", id).with(user(asRequester)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(0));
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].action").value("SUBMIT"))
+                .andExpect(jsonPath("$[0].fromStepName").doesNotExist())
+                .andExpect(jsonPath("$[0].toStepName").value(firstStep.getName()))
+                .andExpect(jsonPath("$[0].actorId").value(requester.getId()));
     }
 
     @Test

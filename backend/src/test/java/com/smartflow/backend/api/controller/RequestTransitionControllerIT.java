@@ -184,8 +184,10 @@ class RequestTransitionControllerIT {
 
         assertThat(taskAssignmentRepository.findByRequestIdAndActiveTrue(id))
                 .hasValueSatisfying(assignment -> assertThat(assignment.getAssignedUser().getId()).isEqualTo(agent.getId()));
-        assertThat(requestHistoryRepository.findByRequestIdOrderByOccurredAtAsc(id)).hasSize(1)
-                .first()
+        // ADR-23 - la soumission elle-même est la première ligne ; la transition est la seconde.
+        assertThat(requestHistoryRepository.findByRequestIdOrderByOccurredAtAsc(id)).hasSize(2)
+                .satisfies(h -> assertThat(h.get(0).getAction()).isEqualTo(WorkflowAction.SUBMIT))
+                .element(1)
                 .satisfies(h -> {
                     assertThat(h.getAction()).isEqualTo(WorkflowAction.ASSIGN);
                     assertThat(h.getFromStep().getId()).isEqualTo(qualification.getId());
@@ -197,11 +199,12 @@ class RequestTransitionControllerIT {
         // same row via the HTTP surface (RequestHistoryMapper), not just the repository.
         mockMvc.perform(get("/api/v1/requests/{id}/history", id).with(user(asRequester)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(1))
-                .andExpect(jsonPath("$[0].action").value("ASSIGN"))
-                .andExpect(jsonPath("$[0].fromStepName").value(qualification.getName()))
-                .andExpect(jsonPath("$[0].toStepName").value(validation.getName()))
-                .andExpect(jsonPath("$[0].actorName").value("Sara Bennis"));
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[0].action").value("SUBMIT"))
+                .andExpect(jsonPath("$[1].action").value("ASSIGN"))
+                .andExpect(jsonPath("$[1].fromStepName").value(qualification.getName()))
+                .andExpect(jsonPath("$[1].toStepName").value(validation.getName()))
+                .andExpect(jsonPath("$[1].actorName").value("Sara Bennis"));
     }
 
     @Test
@@ -226,7 +229,7 @@ class RequestTransitionControllerIT {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("COMMENT_REQUIRED"));
 
-        assertThat(requestHistoryRepository.findByRequestIdOrderByOccurredAtAsc(id)).hasSize(1); // only the earlier ASSIGN
+        assertThat(requestHistoryRepository.findByRequestIdOrderByOccurredAtAsc(id)).hasSize(2); // only SUBMIT and the earlier ASSIGN
     }
 
     @Test
@@ -240,9 +243,9 @@ class RequestTransitionControllerIT {
                 .andExpect(jsonPath("$.availableActions").isEmpty());
 
         var history = requestHistoryRepository.findByRequestIdOrderByOccurredAtAsc(id);
-        assertThat(history).hasSize(2);
-        assertThat(history.get(1).getComment()).isEqualTo("Budget non disponible");
-        assertThat(history.get(1).getAction()).isEqualTo(WorkflowAction.REJECT);
+        assertThat(history).hasSize(3); // SUBMIT (ADR-23), ASSIGN, REJECT
+        assertThat(history.get(2).getComment()).isEqualTo("Budget non disponible");
+        assertThat(history.get(2).getAction()).isEqualTo(WorkflowAction.REJECT);
 
         var request = requestRepository.findById(id).orElseThrow();
         assertThat(request.getSlaEvents()).extracting("eventType").contains(SlaEventType.SUSPENDED);
@@ -261,7 +264,7 @@ class RequestTransitionControllerIT {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.currentStepId").value(validation.getId()));
 
-        assertThat(requestHistoryRepository.findByRequestIdOrderByOccurredAtAsc(id)).hasSize(3);
+        assertThat(requestHistoryRepository.findByRequestIdOrderByOccurredAtAsc(id)).hasSize(4); // SUBMIT, ASSIGN, RETURN, ASSIGN
     }
 
     @Test

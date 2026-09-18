@@ -14,6 +14,7 @@ function comment(overrides: Partial<CommentResponse> = {}): CommentResponse {
     authorName: 'Amina Idrissi',
     body: 'Un commentaire existant.',
     createdAt: '2026-08-01T10:00:00Z',
+    mentions: [],
     ...overrides,
   };
 }
@@ -31,6 +32,29 @@ describe('CommentThread', () => {
 
     expect(await screen.findByText('Bonjour, un souci ?')).toBeInTheDocument();
     expect(screen.getByText('Amina Idrissi')).toBeInTheDocument();
+  });
+
+  it('§6.4/ADR-24 - affiche les personnes réellement mentionnées, telles que le serveur les a retenues', async () => {
+    vi.mocked(commentsApi.listComments).mockResolvedValue([
+      comment({ body: 'Un avis @nawal@x.local ?', mentions: [{ userId: 9, name: 'Nawal Manager' }] }),
+    ]);
+
+    render(<CommentThread requestId={42} />);
+
+    expect(await screen.findByText(/Mentionne : Nawal Manager/)).toBeInTheDocument();
+  });
+
+  it("ADR-24 - une adresse que le serveur n'a pas retenue n'est jamais affichée comme mentionnée", async () => {
+    // Le texte nomme quelqu'un, mais le serveur ne l'a pas retenu (inconnu ou hors
+    // périmètre) : l'écran suit `mentions`, jamais ce que le corps du message contient.
+    vi.mocked(commentsApi.listComments).mockResolvedValue([
+      comment({ body: 'Un avis @inconnu@x.local ?', mentions: [] }),
+    ]);
+
+    render(<CommentThread requestId={42} />);
+
+    await screen.findByText('Un avis @inconnu@x.local ?');
+    expect(screen.queryByText(/Mentionne :/)).not.toBeInTheDocument();
   });
 
   it("affiche un message quand aucun commentaire n'existe encore", async () => {
