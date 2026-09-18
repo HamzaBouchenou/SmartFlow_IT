@@ -205,6 +205,12 @@ public class WorkflowTransitionService {
                     request, "Décision sur votre demande " + request.getReference(), null, variables);
             case CLOSE -> notificationService.notify(request.getRequester(), NotificationType.CLOSURE, request,
                     "Votre demande " + request.getReference() + " a été clôturée", null, variables);
+            // SUBMIT (ADR-23) et REOPEN (ADR-14) ne transitent jamais par ici : elles ne sont
+            // pas résolues par une Transition, donc execute() ne les voit pas. Leurs propres
+            // cas d'usage (RequestService.submit/reopen) notifient eux-mêmes. Énumérées
+            // explicitement plutôt que laissées à un default, pour qu'une action ajoutée plus
+            // tard ne devienne pas silencieusement muette.
+            case SUBMIT, REOPEN -> { }
         }
     }
 

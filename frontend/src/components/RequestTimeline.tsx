@@ -57,9 +57,11 @@ export function RequestTimeline({ requestId }: RequestTimelineProps) {
               <strong>{actionLabel(entry.action as WorkflowAction)}</strong> par {entry.actorName} ·{' '}
               {formatDate(entry.occurredAt)}
             </div>
-            {entry.fromStepName && entry.toStepName && (
+            {/* Une ligne d'entrée (SUBMIT/ADR-23, REOPEN/ADR-14) n'a pas d'étape de départ :
+                le dossier entre dans le circuit, il ne passe pas d'une étape à une autre. */}
+            {entry.toStepName && (
               <p className="timeline-step">
-                {entry.fromStepName} → {entry.toStepName}
+                {entry.fromStepName ? `${entry.fromStepName} → ${entry.toStepName}` : `→ ${entry.toStepName}`}
               </p>
             )}
             {entry.comment && <p>{entry.comment}</p>}

@@ -3,6 +3,7 @@ package com.smartflow.backend.api.controller;
 import com.smartflow.backend.crosscutting.security.SmartFlowUserDetails;
 import com.smartflow.backend.domain.entity.User;
 import com.smartflow.backend.domain.entity.UserRoleAssignment;
+import com.smartflow.backend.domain.enums.NotificationType;
 import com.smartflow.backend.domain.enums.Role;
 import com.smartflow.backend.domain.enums.ScopeType;
 import com.smartflow.backend.infrastructure.repository.AuditLogRepository;
@@ -35,7 +36,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-/** §6.8/§6.10 - modèles d'e-mail, catalogue fermé aux sept NotificationType, seedés en V6. */
+/** §6.8/§6.10 - modèles d'e-mail, catalogue fermé aux NotificationType, seedés en V6
+ * (puis V11 pour MENTION, §6.4/ADR-24). */
 @Testcontainers
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -90,12 +92,16 @@ class EmailTemplateControllerIT {
     }
 
     @Test
-    @DisplayName("§6.8 - lists exactly the seven NotificationType codes, all configured by the V6 seed")
-    void listsAllSevenSeededTemplates() throws Exception {
+    @DisplayName("§6.8 - lists exactly one template per NotificationType, all seeded and configured (V6, puis V11 pour MENTION)")
+    void listsOneSeededTemplatePerNotificationType() throws Exception {
+        // Le nombre attendu se lit sur l'énumération plutôt que d'être recopié : un type
+        // ajouté sans son gabarit (MailService n'enverrait alors rien) fait échouer ce test.
         mockMvc.perform(get("/api/v1/admin/email-templates").with(user(asAdmin)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(7))
-                .andExpect(jsonPath("$[?(@.code=='SUBMISSION')].configured").value(true));
+                .andExpect(jsonPath("$.length()").value(NotificationType.values().length))
+                .andExpect(jsonPath("$[?(@.configured==false)]").isEmpty())
+                .andExpect(jsonPath("$[?(@.code=='SUBMISSION')].configured").value(true))
+                .andExpect(jsonPath("$[?(@.code=='MENTION')].configured").value(true));
     }
 
     @Test

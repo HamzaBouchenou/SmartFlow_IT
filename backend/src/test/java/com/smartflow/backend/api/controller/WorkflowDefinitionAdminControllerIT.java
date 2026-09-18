@@ -13,17 +13,21 @@ import com.smartflow.backend.domain.enums.FieldType;
 import com.smartflow.backend.domain.enums.PublicationStatus;
 import com.smartflow.backend.domain.enums.Role;
 import com.smartflow.backend.domain.enums.ScopeType;
+import com.smartflow.backend.domain.enums.WorkflowAction;
 import com.smartflow.backend.infrastructure.repository.DepartmentRepository;
 import com.smartflow.backend.infrastructure.repository.FormDefinitionRepository;
 import com.smartflow.backend.infrastructure.repository.FormFieldRepository;
 import com.smartflow.backend.infrastructure.repository.RequestTypeRepository;
 import com.smartflow.backend.infrastructure.repository.ServiceCatalogRepository;
 import com.smartflow.backend.infrastructure.repository.TeamRepository;
+import com.smartflow.backend.infrastructure.repository.TransitionRepository;
 import com.smartflow.backend.infrastructure.repository.UserRepository;
 import com.smartflow.backend.infrastructure.repository.UserRoleAssignmentRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
@@ -46,6 +50,7 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -87,6 +92,9 @@ class WorkflowDefinitionAdminControllerIT {
     private FormDefinitionRepository formDefinitionRepository;
     @Autowired
     private FormFieldRepository formFieldRepository;
+
+    @Autowired
+    private TransitionRepository transitionRepository;
 
     private UserDetails asRequester;
     private UserDetails asAdmin;
@@ -201,6 +209,31 @@ class WorkflowDefinitionAdminControllerIT {
                         .contentType("application/json").content(body))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("CROSS_WORKFLOW_TRANSITION"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"SUBMIT", "REOPEN"})
+    @DisplayName("ADR-23/ADR-14 - an action the application executes itself cannot be wired as a transition")
+    void nonConfigurableActionIsRefusedAsTransition(String action) throws Exception {
+        long v1 = createDraft();
+        long qualification = addStep(v1, "QUALIFICATION", "Qualification", 1);
+        long traitement = addStep(v1, "TRAITEMENT", "Traitement", 2);
+
+        String body = objectMapper.writeValueAsString(Map.of("action", action, "toStepId", traitement));
+        mockMvc.perform(post("/api/v1/admin/steps/{id}/transitions", qualification).with(user(asAdmin)).with(csrf())
+                        .contentType("application/json").content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("ACTION_NOT_CONFIGURABLE"));
+
+        // Et la même garde sur la mise à jour, pas seulement sur la création : sinon une
+        // transition légale créée puis rebasculée sur SUBMIT contournerait le contrôle.
+        addAssignTransition(qualification, traitement);
+        long transitionId = transitionRepository.findByFromStepIdAndAction(qualification, WorkflowAction.ASSIGN)
+                .get(0).getId();
+        mockMvc.perform(put("/api/v1/admin/transitions/{id}", transitionId).with(user(asAdmin)).with(csrf())
+                        .contentType("application/json").content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("ACTION_NOT_CONFIGURABLE"));
     }
 
     @Test

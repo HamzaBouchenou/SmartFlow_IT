@@ -10,7 +10,7 @@ import { ErrorBanner } from '../components/ErrorBanner';
  * le motif. Cet écran ne distingue jamais un compte inconnu d'un mot de passe erroné, et
  * n'annonce pas non plus un verrouillage - ce serait rendre les comptes énumérables. */
 export function LoginPage() {
-  const { user, login } = useAuth();
+  const { user, login, sessionExpired } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [email, setEmail] = useState('');
@@ -76,6 +76,18 @@ export function LoginPage() {
         <form className="login-form" onSubmit={handleSubmit}>
           <h1>Connexion</h1>
           <p className="login-subtitle">Accédez à votre espace SmartFlow IT.</p>
+
+          {/* §6.1 "Expiration de session"/ADR-22 - dire pourquoi l'utilisateur se retrouve
+              ici, sans quoi une session expirée est indiscernable d'une déconnexion. Ce
+              message ne révèle rien : son destinataire est celui-là même qui possédait la
+              session. `role="status"` plutôt qu'une alerte - c'est une information sur l'état
+              de l'écran, pas l'échec de la tentative en cours (celui-là reste l'ErrorBanner,
+              et reste unique quel qu'en soit le motif - §13). */}
+          {sessionExpired && (
+            <p className="login-notice" role="status">
+              Votre session a expiré après une période d’inactivité. Veuillez vous reconnecter.
+            </p>
+          )}
 
           <label htmlFor="login-email">Identifiant</label>
           <input

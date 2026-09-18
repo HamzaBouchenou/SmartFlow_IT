@@ -36,6 +36,10 @@ services:
       # connexion plutôt que de la sécuriser. Un déploiement avec TLS devant ce service
       # doit omettre cette variable pour retrouver le défaut sécurisé de l'application.
       SESSION_COOKIE_SECURE: "false"
+      # §15.3 - niveaux de log configurables sans reconstruire l'image ni redéployer.
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_LEVEL_ROOT: ${LOG_LEVEL_ROOT:-INFO}
+      SHOW_SQL: ${SHOW_SQL:-false}
     ports:
       - "8080:8080"
     volumes:

@@ -14,6 +14,19 @@ export function NotificationBell() {
 
   useEffect(() => {
     let cancelled = false;
+    let timer: ReturnType<typeof setInterval> | undefined;
+
+    // Arrêter le minuteur et ignorer ce qui pourrait encore revenir. Le drapeau ne suffit
+    // pas à lui seul : il ne fait que taire le résultat, l'appel réseau, lui, repartirait
+    // toutes les 30 secondes. Les deux vont donc toujours ensemble.
+    function stop() {
+      cancelled = true;
+      if (timer !== undefined) {
+        clearInterval(timer);
+        timer = undefined;
+      }
+    }
+
     async function refresh(background: boolean) {
       try {
         const result = await notificationsApi.unreadCount(background);
@@ -23,24 +36,22 @@ export function NotificationBell() {
       } catch (error) {
         // Un échec de rafraîchissement du badge n'est pas une erreur à interrompre la
         // navigation pour - la page /notifications elle-même affiche l'ErrorBanner utile.
-        // Une session expirée (ADR-22) en est une : le minuteur s'arrête, sans quoi il
-        // interrogerait une route protégée toutes les 30 s jusqu'à la fermeture de
-        // l'onglet, et l'écran continuerait d'afficher un badge que plus rien ne met à
-        // jour.
+        // Une session perdue (ADR-22) en est une : sans arrêt du minuteur, il interrogerait
+        // une route protégée toutes les 30 s jusqu'à la fermeture de l'onglet, et l'écran
+        // continuerait d'afficher un badge que plus rien ne met à jour. AuthProvider, lui,
+        // est déjà prévenu par apiFetch et ramène vers la connexion.
         if (error instanceof ApiError && error.status === 401) {
-          cancelled = true;
+          stop();
           setCount(0);
         }
       }
     }
+
     // Le premier appel accompagne l'affichage de l'écran demandé par l'utilisateur ; les
     // suivants sont l'oeuvre du minuteur seul, donc marqués comme tels (ADR-22).
     void refresh(false);
-    const interval = setInterval(() => void refresh(true), POLL_INTERVAL_MS);
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
+    timer = setInterval(() => void refresh(true), POLL_INTERVAL_MS);
+    return stop;
   }, []);
 
   return (

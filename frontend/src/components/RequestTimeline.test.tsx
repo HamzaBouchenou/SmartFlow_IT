@@ -35,6 +35,17 @@ describe('RequestTimeline', () => {
     expect(screen.getByText('Qualification → Validation')).toBeInTheDocument();
   });
 
+  it("ADR-23 - la frise commence à la soumission, ligne d'entrée sans étape de départ", async () => {
+    vi.mocked(requestsApi.getHistory).mockResolvedValue([
+      historyEntry({ action: 'SUBMIT', fromStepName: null, toStepName: 'Qualification' }),
+    ]);
+
+    render(<RequestTimeline requestId={42} />);
+
+    expect(await screen.findByText(/soumettre/i)).toBeInTheDocument();
+    expect(screen.getByText('→ Qualification')).toBeInTheDocument();
+  });
+
   it("affiche un message quand l'historique est encore vide", async () => {
     render(<RequestTimeline requestId={42} />);
 

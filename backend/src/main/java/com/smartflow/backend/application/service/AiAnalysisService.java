@@ -98,8 +98,23 @@ public class AiAnalysisService {
         suggested.put("priority", result.priority());
         String suggestedValueJson = objectMapper.writeValueAsString(suggested);
 
+        // §12.2/ADR-21/RG-10 - `rawResult` porte le détail par cible, `suggestedValue` reste
+        // le strict couple {category, priority} que le formulaire de validation relit : ce
+        // sont deux contrats distincts, et enrichir le premier ne doit pas déformer le second.
+        //
+        // Le détail est nécessaire depuis qu'un classifieur différent répond pour chaque
+        // cible : la seule moyenne portée par `confidenceScore` peut cacher une suggestion
+        // très sûre à côté d'une suggestion douteuse, et l'agent qui décide d'accepter ne
+        // saurait pas laquelle des deux vérifier. La moyenne reste dans `confidenceScore`,
+        // qui est une colonne unique et le demeure - c'est un résumé, pas la mesure.
+        Map<String, Object> raw = new LinkedHashMap<>(suggested);
+        raw.put("categoryConfidence", result.categoryConfidence());
+        raw.put("priorityConfidence", result.priorityConfidence());
+        raw.put("categoryMethod", result.categoryMethod());
+        raw.put("priorityMethod", result.priorityMethod());
+
         AiAnalysis analysis = new AiAnalysis(request, AiAnalysisType.CLASSIFICATION, suggestedValueJson);
-        analysis.setRawResult(suggestedValueJson);
+        analysis.setRawResult(objectMapper.writeValueAsString(raw));
         analysis.setConfidenceScore((result.categoryConfidence() + result.priorityConfidence()) / 2.0);
         return analysis;
     }

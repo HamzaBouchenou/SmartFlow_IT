@@ -105,8 +105,9 @@ class PilotWorkflowReassignmentIT {
                 .andExpect(jsonPath("$.currentStepId").value(3))
                 .andExpect(jsonPath("$.assignedUserId").value(mehdi.getId()));
 
-        // RG-04/§3.4 - exactly one RequestHistory row per transition actually executed.
-        assertThat(requestHistoryRepository.findByRequestIdOrderByOccurredAtAsc(requestId)).hasSize(2);
+        // RG-04/§3.4 - exactly one RequestHistory row per state change actually recorded:
+        // the submission itself (ADR-23) plus the two ASSIGN transitions.
+        assertThat(requestHistoryRepository.findByRequestIdOrderByOccurredAtAsc(requestId)).hasSize(3);
     }
 
     @Test

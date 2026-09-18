@@ -184,6 +184,7 @@ public class WorkflowAdminService {
                                      Priority conditionPriority, Long conditionDepartmentId, String conditionFieldCode,
                                      String conditionFieldValue) {
         requireFunctionalAdmin(actingUser);
+        requireConfigurableAction(action);
         Step fromStep = getStep(fromStepId);
         requireDraft(fromStep.getWorkflowDefinition());
         Step toStep = resolveToStep(toStepId, fromStep.getWorkflowDefinition());
@@ -201,6 +202,7 @@ public class WorkflowAdminService {
                                         Priority conditionPriority, Long conditionDepartmentId, String conditionFieldCode,
                                         String conditionFieldValue) {
         requireFunctionalAdmin(actingUser);
+        requireConfigurableAction(action);
         Transition transition = getTransition(transitionId);
         requireDraft(transition.getFromStep().getWorkflowDefinition());
         transition.setAction(action);
@@ -241,6 +243,19 @@ public class WorkflowAdminService {
                 : null);
         transition.setConditionFieldCode(conditionFieldCode);
         transition.setConditionFieldValue(conditionFieldValue);
+    }
+
+    /** ADR-23/ADR-14 - SUBMIT et REOPEN écrivent une ligne d'historique sans jamais être
+     * un arc du graphe : RequestService les exécute directement, WorkflowTransitionService
+     * ne les résout jamais. Câblée ici, une telle transition serait enregistrée, proposée
+     * dans availableActions[], puis systématiquement refusée à l'exécution - un piège pour
+     * l'administrateur autant que pour l'utilisateur. */
+    private void requireConfigurableAction(WorkflowAction action) {
+        if (!action.isConfigurable()) {
+            throw new AdministrationValidationException("ACTION_NOT_CONFIGURABLE",
+                    "L'action " + action + " ne peut pas être câblée comme transition : elle est exécutée "
+                            + "directement par l'application, jamais par le graphe de workflow.");
+        }
     }
 
     /** §6.4 - CLOSE (et seulement CLOSE) est terminale, sans étape cible ; toute autre

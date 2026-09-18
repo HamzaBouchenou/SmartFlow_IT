@@ -19,7 +19,17 @@ export type FieldType =
 // other five: it is never resolved from a Step Transition, so it never appears together
 // with them (a request only ever has REOPEN available while CLOSED, when none of the
 // others can be). ActionBar never receives it - see ReopenButton.
-export type WorkflowAction = 'VALIDATE' | 'REJECT' | 'RETURN' | 'ASSIGN' | 'REQUEST_INFO' | 'CLOSE' | 'REOPEN';
+// SUBMIT (ADR-23) et REOPEN (ADR-14) apparaissent dans l'historique (§6.4) sans jamais
+// apparaître dans availableActions[] : elles ne sont pas des transitions de workflow.
+export type WorkflowAction =
+  | 'SUBMIT'
+  | 'VALIDATE'
+  | 'REJECT'
+  | 'RETURN'
+  | 'ASSIGN'
+  | 'REQUEST_INFO'
+  | 'CLOSE'
+  | 'REOPEN';
 
 export type RequestStatus = 'DRAFT' | 'SUBMITTED' | 'CLOSED' | 'CANCELLED' | 'ARCHIVED';
 
@@ -34,7 +44,9 @@ export type NotificationType =
   | 'DECISION'
   | 'SLA_WARNING'
   | 'SLA_BREACH'
-  | 'CLOSURE';
+  | 'CLOSURE'
+  // §6.4/ADR-24 - une mention dans un commentaire. Facultative au sens d'ADR-12.
+  | 'MENTION';
 
 // §12.1 - seules CLASSIFICATION et SUMMARY sont branchées (P1) ; DOCUMENT_SEARCH et
 // REPLY_SUGGESTION restent dans l'énumération back-end (P2/Option, ADR-16) mais aucune
@@ -264,6 +276,15 @@ export interface CommentResponse {
   authorName: string;
   body: string;
   createdAt: string;
+  // §6.4/ADR-24 - les personnes effectivement retenues par le serveur, jamais celles que le
+  // texte nomme : une adresse inconnue ou hors périmètre n'apparaît pas ici (RG-06). Jamais
+  // d'adresse e-mail en retour - l'afficher publierait l'annuaire à qui lit le fil.
+  mentions: CommentMentionResponse[];
+}
+
+export interface CommentMentionResponse {
+  userId: number;
+  name: string;
 }
 
 export interface CreateCommentRequest {
